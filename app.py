@@ -61,10 +61,18 @@ def on_send(text, file_path, history):
 with gr.Blocks() as demo:
     gr.Markdown("## 糖尿病助手 🩸 — 左：对话交互；右：病例记录示例")
 
+    # 初始欢迎语
+    welcome_msg = [{"role": "assistant", "content": "您好，我是糖尿病专业助手，有什么可以帮您的？"}]
+
     with gr.Row():
         # 左侧：聊天区
         with gr.Column(scale=3):
-            chatbot = gr.Chatbot(type="messages", label="对话记录", height=500)
+            chatbot = gr.Chatbot(
+                type="messages",
+                label="对话记录",
+                height=500,
+                value=welcome_msg  # 设置初始消息
+            )
             with gr.Row():
                 upload_btn = gr.UploadButton(
                     "📎 上传图片",
@@ -77,6 +85,22 @@ with gr.Blocks() as demo:
                     show_label=False
                 )
                 send_btn = gr.Button("发送")
+            # 将Examples放在左侧聊天区底部
+            gr.Examples(
+                examples=[
+                    "糖尿病如何控制血糖？",
+                    "胰岛素使用注意事项？",
+                    "低血糖处理方式",
+                    "糖尿病饮食有哪些禁忌？",
+                    "运动对血糖影响",
+                    "如何监测血糖变化？",
+                    "糖尿病并发症有哪些？",
+                    "胰岛素泵的适用性",
+                    "血糖高有哪些症状？",
+                    "我最近血糖有点高，怎么缓解？"
+                ],
+                inputs=[text_input]
+            )
 
         # 右侧：病例记录区
         with gr.Column(scale=2):
@@ -86,7 +110,7 @@ with gr.Blocks() as demo:
                 elem_id="case-record"
             )
 
-    state = gr.State([])
+    state = gr.State(welcome_msg)  # 初始状态包含欢迎语
 
     # 绑定上传事件
     upload_btn.upload(
