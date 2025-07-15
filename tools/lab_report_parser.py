@@ -31,17 +31,20 @@ def parse_lab_report(file_bytes: bytes) -> dict:
 
 def parse_lab_report_text(text: str) -> dict:
     """
-    使用大模型从检验报告纯文本中提取常见医学指标：
-    空腹血糖(fasting_glucose)、HbA1c(hba1c)、OGTT 2小时血糖(ogtt_2h)、BMI(bmi)、身高(height)、体重(weight)、收缩压(systolic_bp)、舒张压(diastolic_bp)、心率(heart_rate)、体温(temperature)。
-    返回严格的 JSON 格式字典。
+    使用大模型从检验报告纯文本中提取常见医学指标，要求返回严格的中文key的JSON：
+    空腹血糖、半小时血糖、一小时血糖、两小时血糖、三小时血糖、糖化血红蛋白、BMI、身高、体重、收缩压、舒张压、心率、体温。
     """
     if not text:
         return {}
-    # 构造 prompt，要求返回纯 JSON
     prompt = (
-        "请从以下检验报告文本中，尽可能多地提取以下医学指标，并以严格的 JSON 格式返回："
-        "空腹血糖(fasting_glucose)、HbA1c(hba1c)、OGTT 2小时血糖(ogtt_2h)、BMI(bmi)、身高(height)、体重(weight)、收缩压(systolic_bp)、舒张压(diastolic_bp)、心率(heart_rate)、体温(temperature)。"
-        "如果某项没有提及请返回 null。示例：{\"fasting_glucose\":6.8,\"hba1c\":6.2,\"ogtt_2h\":9.1,\"bmi\":24.5,\"height\":170,\"weight\":68,\"systolic_bp\":120,\"diastolic_bp\":80,\"heart_rate\":75,\"temperature\":36.5}"
+        "请从以下检验报告文本中，尽可能多地提取以下医学指标，并以严格的 JSON 格式返回，所有key必须为中文。"
+        "每个指标请同时识别其常见的中文、英文缩写或别名："
+        "空腹血糖（GLU、FPG、Fasting Glucose）、半小时血糖、"
+        "一小时血糖、两小时血糖（2hPG、2小时血糖）、三小时血糖、"
+        "糖化血红蛋白（HbA1c、糖化）、BMI、身高（Height）、体重（Weight）、"
+        "收缩压（SBP、Systolic）、舒张压（DBP、Diastolic）、心率（HR、Heart Rate）、体温（T、Temp、Temperature）。"
+        "如果某项没有提及请返回 null。示例："
+        '{"空腹血糖":6.8,"半小时血糖":null,"一小时血糖":null,"两小时血糖":9.1,"三小时血糖":null,"糖化血红蛋白":6.2,"BMI":24.5,"身高":170,"体重":68,"收缩压":120,"舒张压":80,"心率":75,"体温":36.5}'
         f"\n报告文本：{text}"
     )
     response = llm._call(prompt)

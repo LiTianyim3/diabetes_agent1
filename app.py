@@ -66,30 +66,12 @@ def on_file_upload(file_paths, history, file_list):
             history.append({"role":"system", "content":f"已上传图片：{name}\n\n{md}"})
             # 自动解析图片医学指标
             result = parse_lab_report(file_bytes)
-            print('result:' + str(result))
-            # 自动遍历所有非空医学指标并展示
+            # 自动遍历所有非空医学指标并展示（直接用中文key）
             if any(result.values()):
-                field_map = {
-                    "name": "姓名",
-                    "age": "年龄",
-                    "gender": "性别",
-                    "sex": "性别",
-                    "fasting_glucose": "空腹血糖(mmol/L)",
-                    "hba1c": "HbA1c(%)",
-                    "ogtt_2h": "OGTT 2小时血糖(mmol/L)",
-                    "bmi": "BMI",
-                    "height": "身高(cm)",
-                    "weight": "体重(kg)",
-                    "systolic_bp": "收缩压(mmHg)",
-                    "diastolic_bp": "舒张压(mmHg)",
-                    "heart_rate": "心率(次/分)",
-                    "temperature": "体温(℃)"
-                }
                 summary = []
                 for k, v in result.items():
                     if v is not None:
-                        label = field_map.get(k, k)
-                        summary.append(f"{label}: {v}")
+                        summary.append(f"{k}: {v}")
                 if summary:
                     history.append({"role": "system", "content": "自动识别信息：\n" + "\n".join(summary)})
         elif ext == "pdf":
@@ -98,27 +80,10 @@ def on_file_upload(file_paths, history, file_list):
             # 自动解析 PDF 医学指标
             result = parse_lab_report(file_bytes)
             if any(result.values()):
-                field_map = {
-                    "name": "姓名",
-                    "age": "年龄",
-                    "gender": "性别",
-                    "sex": "性别",
-                    "fasting_glucose": "空腹血糖(mmol/L)",
-                    "hba1c": "HbA1c(%)",
-                    "ogtt_2h": "OGTT 2小时血糖(mmol/L)",
-                    "bmi": "BMI",
-                    "height": "身高(cm)",
-                    "weight": "体重(kg)",
-                    "systolic_bp": "收缩压(mmHg)",
-                    "diastolic_bp": "舒张压(mmHg)",
-                    "heart_rate": "心率(次/分)",
-                    "temperature": "体温(℃)"
-                }
                 summary = []
                 for k, v in result.items():
                     if v is not None:
-                        label = field_map.get(k, k)
-                        summary.append(f"{label}: {v}")
+                        summary.append(f"{k}: {v}")
                 if summary:
                     history.append({"role": "system", "content": "自动识别信息：\n" + "\n".join(summary)})
         else:
