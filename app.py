@@ -1,164 +1,109 @@
-import json
+import os
+import base64
 import logging
 import gradio as gr
-import re
 from client.zhipu_llm import ZhipuLLM
-from tools.lab_report_parser import parse_lab_report  # 新增导入
 
-# 配置日志
+# 日志配置
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    format="%(asctime)s %(levelname)s: %(message)s"
 )
 logger = logging.getLogger(__name__)
 
+# 初始化智谱 LLM
 llm = ZhipuLLM()
-user_info = {}
 
-KEYWORDS = ["血糖", "糖尿病", "高血糖", "低血糖", "HbA1c", "OGTT", "多尿", "多饮", "多食", "家族史"]
-
-def extract_info(user_message: str):
-    # 简单正则/关键词提取，可扩展
-    info = {}
-    if re.search(r"\d+(\.\d+)?\s*mmol", user_message):
-        info["blood_glucose"] = True
-    if any(k in user_message for k in ["糖尿病", "高血糖", "低血糖"]):
-        info["diabetes"] = True
-    # ...可扩展更多字段...
-    return info
-
-def need_more_info(info: dict):
-    # 判断是否需要补充信息
-    # 这里只做简单判断，实际可更复杂
-    if not info.get("blood_glucose") and not info.get("diabetes"):
-        return True
-    return False
-
-def summarize_output(text: str) -> str:
-    """
-    用大模型将输出内容总结为一句简洁明了的摘要。
-    """
-    if not text:
-        return ""
-    prompt = (
-        "请将以下健康建议内容总结为一句简洁明了的摘要，突出重点，避免冗长：\n"
-        f"{text}"
-    )
-    try:
-        return llm._call(prompt)
-    except Exception as e:
-        return f"摘要失败: {str(e)}"
-
-def summarize_history(history):
-    """
-    对历史对话进行摘要，只总结机器人回复内容。
-    """
-    if not history:
-        return ""
-    # 只取机器人回复
-    bot_texts = [msg[1] for msg in history if len(msg) > 1 and msg[1]]
-    text = "\n".join(bot_texts)
-    return summarize_output(text)
-
-def answer_question_simple(user_message, history):
-    global user_info
-    logger.info(f"answer_question_simple called with user_message: '{user_message}'")
+def on_file_upload(file_path, history, case_text):
     history = history or []
-    bot_msg = "正在生成，请稍候..."
-    history.append([user_message, bot_msg])
+    if not file_path:
+        return history, history, case_text
+    with open(file_path, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode("utf-8")
+    ext = os.path.splitext(file_path)[1].lower().lstrip(".")
+    md_img = f"![上传的报告](data:image/{ext};base64,{b64})"
+    history.append({
+        "role": "system",
+        "content": f"已上传文件：{os.path.basename(file_path)}\n\n{md_img}"
+    })
+    return history, history, case_text
 
-    # 关键词检测
-    hit = any(k in user_message for k in KEYWORDS)
-    info = extract_info(user_message)
-    user_info.update(info)
+def on_send(text, file_path, history):
+    history = history or []
+    user_msg = text or ""
+    if file_path:
+        user_msg = (user_msg + "\n") if user_msg else ""
+        user_msg += f"[已上传文件：{os.path.basename(file_path)}]"
+    history.append({"role": "user", "content": user_msg})
 
-    if hit:
-        if need_more_info(user_info):
-            prompt = (
-                f"用户输入：{user_message}\n"
-                "请判断用户是否需要补充健康检查报告或描述具体症状，"
-                "如果信息不足，请专业地引导用户补充相关信息；"
-                "如果信息充足，则给出专业建议。"
-            )
-        else:
-            prompt = (
-                f"用户输入：{user_message}\n"
-                "请结合用户已提供的信息，给出专业的健康建议。"
-            )
-    else:
-        prompt = (
-            f"用户输入：{user_message}\n"
-            "请用专业简明的自然语言安抚用户，并引导其补充健康检查报告或描述具体症状。"
-        )
-
+    prompt = f"用户消息：{user_msg}\n请你基于此给出专业的糖尿病检测/管理建议。"
+    logger.info("Prompt to LLM: %s", prompt)
     try:
-        bot_msg = llm._call(prompt)
+        reply = llm._call(prompt)
     except Exception as e:
-        bot_msg = f"发生错误：{str(e)}"
-    history[-1][1] = bot_msg
-    # 不再自动生成摘要
-    return history, history
+        reply = f"模型调用出错：{e}"
+    history.append({"role": "assistant", "content": reply})
 
-def parse_report_file(file):
-    if file is None:
-        return ""
+    # 生成病例记录
+    hist_text = "\n".join(f"{m['role']}: {m['content']}" for m in history)
+    case_prompt = (
+        f"请根据以下对话内容和历史，生成一份结构化的糖尿病患者病例记录：\n\n{hist_text}\n\n"
+        "病例记录应包括：基本信息、主诉、现病史、既往史、检查结果、初步诊断、管理建议。"
+    )
+    logger.info("Case prompt to LLM: %s", case_prompt)
     try:
-        with open(file.name, "rb") as f:
-            file_bytes = f.read()
-        result = parse_lab_report(file_bytes)
-        if not result:
-            return "未识别到有效指标，请确认文件内容。"
-        # 格式化摘要
-        summary = []
-        if result.get("fasting_glucose") is not None:
-            summary.append(f"空腹血糖: {result['fasting_glucose']} mmol/L")
-        if result.get("hba1c") is not None:
-            summary.append(f"HbA1c: {result['hba1c']} %")
-        if result.get("ogtt_2h") is not None:
-            summary.append(f"OGTT 2小时血糖: {result['ogtt_2h']} mmol/L")
-        if result.get("bmi") is not None:
-            summary.append(f"BMI: {result['bmi']}")
-        return "\n".join(summary) if summary else "未识别到有效指标。"
+        case_record = llm._call(case_prompt)
     except Exception as e:
-        return f"解析失败: {str(e)}"
+        case_record = f"生成病例出错：{e}"
 
-# 构建 Gradio 界面
+    return history, history, case_record
+
 with gr.Blocks() as demo:
-    gr.Markdown("## 糖医助手 🩸")
+    gr.Markdown("## 糖尿病助手 🩸 — 左：对话交互；右：病例记录示例")
+
     with gr.Row():
-        # 左侧：聊天记录、输入区
+        # 左侧：聊天区
         with gr.Column(scale=3):
-            chatbot = gr.Chatbot(label="对话记录")
-            user_input = gr.Textbox(
-                label="请输入您的问题",
-                placeholder="如：我最近血糖有点高，怎么办？",
-                lines=2
-            )
-            send_btn = gr.Button("发送")
-           
-        # 右侧：文件上传和报告摘要
+            chatbot = gr.Chatbot(type="messages", label="对话记录", height=500)
+            with gr.Row():
+                upload_btn = gr.UploadButton(
+                    "📎 上传图片",
+                    file_types=[".png", ".jpg", ".jpeg"],
+                    type="filepath"
+                )
+                text_input = gr.Textbox(
+                    placeholder="请输入问题或备注（可选）",
+                    lines=1,
+                    show_label=False
+                )
+                send_btn = gr.Button("发送")
+
+        # 右侧：病例记录区
         with gr.Column(scale=2):
-            report_file = gr.File(label="检验报告文件上传（PDF/图片）")
-            report_summary = gr.Textbox(label="报告摘要", lines=5)  # 报告摘要框移到文件上传框下方
-            summarize_btn = gr.Button("总结报告摘要")
+            case_record = gr.Markdown(
+                "**病例记录**\n\n尚无内容",
+                label="生成的病例记录",
+                elem_id="case-record"
+            )
+
     state = gr.State([])
 
-    # 发送按钮和输入框提交时，不再输出摘要
+    # 绑定上传事件
+    upload_btn.upload(
+        fn=on_file_upload,
+        inputs=[upload_btn, state, case_record],
+        outputs=[chatbot, state, case_record]
+    )
+    # 绑定发送事件
     send_btn.click(
-        fn=answer_question_simple,
-        inputs=[user_input, state],
-        outputs=[chatbot, state]
+        fn=on_send,
+        inputs=[text_input, upload_btn, state],
+        outputs=[chatbot, state, case_record]
     )
-    user_input.submit(
-        fn=answer_question_simple,
-        inputs=[user_input, state],
-        outputs=[chatbot, state]
-    )
-    # 总结按钮点击时，输出摘要到报告摘要框
-    summarize_btn.click(
-        fn=summarize_history,
-        inputs=[state],
-        outputs=[report_summary]
+    text_input.submit(
+        fn=on_send,
+        inputs=[text_input, upload_btn, state],
+        outputs=[chatbot, state, case_record]
     )
 
 if __name__ == "__main__":
