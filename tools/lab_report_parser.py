@@ -16,34 +16,32 @@ def parse_lab_report(file_bytes: bytes) -> dict:
         with pdfplumber.open(BytesIO(file_bytes)) as pdf:
             for page in pdf.pages:
                 text += page.extract_text() or ""
-    except:
+    except Exception as e_pdf:
         # 如果不是 PDF，则当图片 OCR
-        img = Image.open(BytesIO(file_bytes))
-        text = pytesseract.image_to_string(img, lang='chi_sim+eng')
-    # 正则提取常用指标
-    def find_first(pattern):
-        m = re.search(pattern, text)
-        return float(m.group(1)) if m else None
-
-    return {
-        "fasting_glucose": find_first(r"空腹.*?([\d\.]+)\s*mmol"),
-        "hba1c":            find_first(r"HbA1c[:： ]*([\d\.]+)\s*%"),
-        "ogtt_2h":          find_first(r"OGTT.*?2\s*h.*?([\d\.]+)\s*mmol"),
-        "bmi":              find_first(r"BMI[:： ]*([\d\.]+)"),
-    }
+        try:
+            img = Image.open(BytesIO(file_bytes))
+            text = pytesseract.image_to_string(img, lang='chi_sim+eng')
+            print("[OCR图片内容]:\n" + text)
+            
+        except Exception as e_img:
+            # 友好提示，返回结构化错误信息
+            return {"error": f"图片解析失败：{e_img}。请确保上传的是清晰的图片或标准PDF。"}
+    # 直接交给大模型分析文本内容，提取医学指标
+    return parse_lab_report_text(text)
 
 def parse_lab_report_text(text: str) -> dict:
     """
-    使用大模型从检验报告纯文本中提取关键指标：
-    空腹血糖 (fasting_glucose)、HbA1c、OGTT 2小时血糖 (ogtt_2h)、BMI。
+    使用大模型从检验报告纯文本中提取常见医学指标：
+    空腹血糖(fasting_glucose)、HbA1c(hba1c)、OGTT 2小时血糖(ogtt_2h)、BMI(bmi)、身高(height)、体重(weight)、收缩压(systolic_bp)、舒张压(diastolic_bp)、心率(heart_rate)、体温(temperature)。
     返回严格的 JSON 格式字典。
     """
     if not text:
         return {}
     # 构造 prompt，要求返回纯 JSON
     prompt = (
-        "请从以下检验报告中提取空腹血糖、HbA1c、OGTT 2小时血糖、BMI，"
-        "并以严格的 JSON 格式返回，例如 {\"fasting_glucose\":6.8,\"hba1c\":6.2,\"ogtt_2h\":9.1,\"bmi\":24.5}。"
+        "请从以下检验报告文本中，尽可能多地提取以下医学指标，并以严格的 JSON 格式返回："
+        "空腹血糖(fasting_glucose)、HbA1c(hba1c)、OGTT 2小时血糖(ogtt_2h)、BMI(bmi)、身高(height)、体重(weight)、收缩压(systolic_bp)、舒张压(diastolic_bp)、心率(heart_rate)、体温(temperature)。"
+        "如果某项没有提及请返回 null。示例：{\"fasting_glucose\":6.8,\"hba1c\":6.2,\"ogtt_2h\":9.1,\"bmi\":24.5,\"height\":170,\"weight\":68,\"systolic_bp\":120,\"diastolic_bp\":80,\"heart_rate\":75,\"temperature\":36.5}"
         f"\n报告文本：{text}"
     )
     response = llm._call(prompt)

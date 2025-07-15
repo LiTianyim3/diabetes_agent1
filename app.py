@@ -46,6 +46,9 @@ def on_file_upload(file_paths, history, file_list):
         return history, history, file_list, gr.update(choices=opts, value=[])
 
     paths = file_paths if isinstance(file_paths, list) else [file_paths]
+
+    from tools.lab_report_parser import parse_lab_report
+
     for p in paths:
         if p in file_list:
             continue
@@ -54,15 +57,70 @@ def on_file_upload(file_paths, history, file_list):
         ext  = os.path.splitext(name)[1].lower().lstrip(".")
 
         with open(p, "rb") as f:
-            b64 = base64.b64encode(f.read()).decode("utf-8")
+            file_bytes = f.read()
+            b64 = base64.b64encode(file_bytes).decode("utf-8")
 
+        # 聊天区插入图片/文件
         if ext in ("png","jpg","jpeg"):
             md = f"![{name}](data:image/{ext};base64,{b64})"
             history.append({"role":"system", "content":f"已上传图片：{name}\n\n{md}"})
+            # 自动解析图片医学指标
+            result = parse_lab_report(file_bytes)
+            print('result:' + str(result))
+            # 自动遍历所有非空医学指标并展示
+            if any(result.values()):
+                field_map = {
+                    "name": "姓名",
+                    "age": "年龄",
+                    "gender": "性别",
+                    "sex": "性别",
+                    "fasting_glucose": "空腹血糖(mmol/L)",
+                    "hba1c": "HbA1c(%)",
+                    "ogtt_2h": "OGTT 2小时血糖(mmol/L)",
+                    "bmi": "BMI",
+                    "height": "身高(cm)",
+                    "weight": "体重(kg)",
+                    "systolic_bp": "收缩压(mmHg)",
+                    "diastolic_bp": "舒张压(mmHg)",
+                    "heart_rate": "心率(次/分)",
+                    "temperature": "体温(℃)"
+                }
+                summary = []
+                for k, v in result.items():
+                    if v is not None:
+                        label = field_map.get(k, k)
+                        summary.append(f"{label}: {v}")
+                if summary:
+                    history.append({"role": "system", "content": "自动识别信息：\n" + "\n".join(summary)})
         elif ext == "pdf":
-            # PDF 以链接形式
             md = f"[📄 {name}](data:application/pdf;base64,{b64})"
             history.append({"role":"system","content":f"已上传 PDF：{md}"})
+            # 自动解析 PDF 医学指标
+            result = parse_lab_report(file_bytes)
+            if any(result.values()):
+                field_map = {
+                    "name": "姓名",
+                    "age": "年龄",
+                    "gender": "性别",
+                    "sex": "性别",
+                    "fasting_glucose": "空腹血糖(mmol/L)",
+                    "hba1c": "HbA1c(%)",
+                    "ogtt_2h": "OGTT 2小时血糖(mmol/L)",
+                    "bmi": "BMI",
+                    "height": "身高(cm)",
+                    "weight": "体重(kg)",
+                    "systolic_bp": "收缩压(mmHg)",
+                    "diastolic_bp": "舒张压(mmHg)",
+                    "heart_rate": "心率(次/分)",
+                    "temperature": "体温(℃)"
+                }
+                summary = []
+                for k, v in result.items():
+                    if v is not None:
+                        label = field_map.get(k, k)
+                        summary.append(f"{label}: {v}")
+                if summary:
+                    history.append({"role": "system", "content": "自动识别信息：\n" + "\n".join(summary)})
         else:
             history.append({"role":"system","content":f"已上传文件：{name}"})
 
@@ -79,13 +137,27 @@ def on_delete(selected, file_list):
 def on_send(text, file_list, history):
     history   = history or []
     user_msg  = text or ""
+    # 检查是否有图片/报告自动识别信息
+    auto_info = None
+    for m in reversed(history):
+        if m["role"] == "system" and m["content"].startswith("自动识别信息："):
+            auto_info = m["content"]
+            break
     if file_list:
         names = ", ".join(os.path.basename(p) for p in file_list)
         user_msg = (user_msg + "\n" if user_msg else "") + f"[已上传文件：{names}]"
     history.append({"role":"user","content":user_msg})
 
     # LLM 建议
-    prompt = f"用户消息：{user_msg}\n请基于此给出专业的糖尿病检测/管理建议。"
+    if auto_info:
+        # 有自动识别信息，优先让LLM基于图片/报告结构化内容给建议
+        prompt = (
+            f"用户上传了医学报告或图片，系统自动识别出如下结构化信息：\n{auto_info}\n"
+            f"请基于这些医学信息，结合用户消息“{user_msg}”，给出专业的糖尿病检测/管理建议。"
+            "如果信息不全可适当说明，但不要说无法识别图片。"
+        )
+    else:
+        prompt = f"用户消息：{user_msg}\n请基于此给出专业的糖尿病检测/管理建议。"
     logger.info("Prompt to LLM: %s", prompt)
     try: reply = llm._call(prompt)
     except Exception as e: reply = f"模型调用出错：{e}"
@@ -104,14 +176,8 @@ def on_send(text, file_list, history):
     # **发送后清空已上传列表**
     return history, history, case, [], gr.update(choices=[], value=[])
 
-<<<<<<< HEAD
-
-with gr.Blocks() as demo:
-    gr.Markdown("## 糖尿病助手 🩸 — 左：对话交互；右：病例记录示例")
-=======
 with gr.Blocks(css=css) as demo:
     gr.Markdown("## 糖尿病助手 🩸 — 左：对话；已上传文件列表带×可点删；每次发送后清空")
->>>>>>> origin/zc
 
     # 初始引导消息
     initial_message = {
@@ -125,11 +191,7 @@ with gr.Blocks(css=css) as demo:
     with gr.Row():
         # 左侧对话区域
         with gr.Column(scale=3):
-<<<<<<< HEAD
-            chatbot = gr.Chatbot(type="messages", label="对话记录", height=500, value=[initial_message])
-=======
-            chatbot = gr.Chatbot(type="messages", height=400)
->>>>>>> origin/zc
+            chatbot = gr.Chatbot(type="messages", height=400, value=[initial_message])
             with gr.Row():
                 upload_btn = gr.UploadButton(
                     "📎 上传文件",
@@ -148,13 +210,8 @@ with gr.Blocks(css=css) as demo:
         with gr.Column(scale=2):
             case_md = gr.Markdown("**病例记录**\n\n尚无内容")
 
-<<<<<<< HEAD
-    # 初始对话历史，包含引导消息
-    state = gr.State([initial_message])
-=======
     state     = gr.State([])  # 聊天历史
     file_list = gr.State([])  # 文件路径列表
->>>>>>> origin/zc
 
     # 上传 -> 更新聊天 & 文件列表
     upload_btn.upload(
