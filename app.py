@@ -3,6 +3,7 @@ import base64
 import logging
 import gradio as gr
 from client.zhipu_llm import ZhipuLLM
+import datetime
 
 logging.basicConfig(
     level=logging.INFO,
@@ -10,6 +11,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 llm = ZhipuLLM()
+
+DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+os.makedirs(DATA_DIR, exist_ok=True)
 
 # CSS：左侧 × 图标 & 悬停高亮
 css = """
@@ -33,6 +37,11 @@ css = """
 /* 悬停高亮 */
 #file-selector .gr-checkbox:hover {
   background-color: #f5f5f5;
+}
+/* 限制清除按钮宽度 */
+#clear-btn {s
+  min-width: 50px;
+  max-width: 80px;
 }
 """
 
@@ -99,7 +108,7 @@ def on_delete(selected, file_list):
     opts = [os.path.basename(p) for p in remaining]
     return remaining, gr.update(choices=opts, value=[])
 
-def on_send(text, file_list, history):
+def on_send(text, file_list, history, name, age, weight, gender, past_history):
     history   = history or []
     user_msg  = text or ""
     # 检查是否有图片/报告自动识别信息
@@ -111,6 +120,7 @@ def on_send(text, file_list, history):
     if file_list:
         names = ", ".join(os.path.basename(p) for p in file_list)
         user_msg = (user_msg + "\n" if user_msg else "") + f"[已上传文件：{names}]"
+    # 用户消息直接传递
     history.append({"role":"user","content":user_msg})
 
     # LLM 建议
@@ -128,21 +138,44 @@ def on_send(text, file_list, history):
     except Exception as e: reply = f"模型调用出错：{e}"
     history.append({"role":"assistant","content":reply})
 
-    # 生成病例记录
+    # 发送后清空已上传列表，不再自动生成病例
+    return history, history, [], gr.update(choices=[], value=[]), gr.update(value="")
+
+def on_generate_case(history, name=None, age=None, weight=None, gender=None, past_history=None):
+    if not history or len(history) == 0:
+        return "**病例记录**\n\n尚无内容"
     hist = "\n".join(f"{m['role']}: {m['content']}" for m in history)
+    personal_info = (
+        f"姓名：{name or '未填写'}；年龄：{age or '未填写'}；体重：{weight or '未填写'}；"
+        f"性别：{gender or '未填写'}；既往史：{past_history or '未填写'}"
+    )
     case_p = (
-        f"请根据以下对话生成结构化糖尿病病例：\n\n{hist}\n\n"
-        "病例应包括：基本信息、主诉、现病史、既往史、检查结果、初步诊断、管理建议。"
+        f"请根据以下对话和个人信息生成结构化糖尿病病例：\n\n"
+        f"{personal_info}\n\n{hist}\n\n"
+        "病例应包括：用户个人信息(姓名，年龄，体重，性别)、主诉、现病史、既往史、检查结果、初步诊断、管理建议。控制字数在500字之内"
     )
     logger.info("Case prompt to LLM: %s", case_p)
-    try: case = llm._call(case_p)
-    except Exception as e: case = f"生成病例出错：{e}"
+    try:
+        case = llm._call(case_p)
+    except Exception as e:
+        case = f"生成病例出错：{e}"
+        return case
+    return case
 
-    # **发送后清空已上传列表**
-    return history, history, case, [], gr.update(choices=[], value=[])
+def on_clear_history():
+    welcome_msg = [{"role": "assistant", "content": "您好，我是糖尿病专业助手，请您提供详细病例信息，以便我为您量身定制医学建议。"}]
+    return welcome_msg, welcome_msg, "**病例记录**\n\n尚无内容"
 
 with gr.Blocks(css=css) as demo:
-    gr.Markdown("## 糖尿病助手 🩸 — 左：对话；已上传文件列表带×可点删；每次发送后清空")
+    gr.Markdown("## 糖尿病助手 🩸 — 左：对话交互；右：病例记录")
+
+    # 新增：个人信息输入框
+    with gr.Row():
+        name_input = gr.Textbox(label="姓名", placeholder="请输入姓名", lines=1)
+        age_input = gr.Textbox(label="年龄", placeholder="请输入年龄", lines=1)
+        weight_input = gr.Textbox(label="体重（kg）", placeholder="请输入体重", lines=1)
+        gender_input = gr.Dropdown(label="性别", choices=["男", "女"], value=None)
+        history_input = gr.Textbox(label="既往史", placeholder="请输入既往史", lines=1)
 
     # 初始引导消息
     initial_message = {
@@ -156,27 +189,54 @@ with gr.Blocks(css=css) as demo:
     with gr.Row():
         # 左侧对话区域
         with gr.Column(scale=3):
-            chatbot = gr.Chatbot(type="messages", height=400, value=[initial_message])
+            chatbot = gr.Chatbot(type="messages", label="对话记录", height=500)
             with gr.Row():
                 upload_btn = gr.UploadButton(
                     "📎 上传文件",
                     file_types=[".png",".jpg",".jpeg",".pdf"],
                     file_count="multiple",
-                    type="filepath"
+                    type="filepath",
+                    elem_id="upload-btn",
+                    scale=1
                 )
-                text_input = gr.Textbox(placeholder="输入...", lines=1, show_label=False)
-                send_btn   = gr.Button("发送")
-            # 文件列表：勾选即删
+                text_input = gr.Textbox(
+                    placeholder="请输入问题或备注（可选）",
+                    lines=1,
+                    show_label=False,
+                    elem_id="text-input",
+                    scale=2
+                )
+                send_btn = gr.Button("发送", elem_id="send-btn", scale=1)
+            file_list = gr.State([])  # 用于存储文件路径
             file_selector = gr.CheckboxGroup(
-                choices=[], label="已上传文件列表", elem_id="file-selector"
+                choices=[],
+                label="已上传文件（点击 × 删除）",
+                elem_id="file-selector"
             )
+            with gr.Row():
+                gr.Examples(
+                    examples=[
+                        "糖尿病如何控制血糖？",
+                        "胰岛素使用注意事项？",
+                        "低血糖处理方式",
+                        "我最近血糖有点高，怎么缓解？",
+                        "糖尿病饮食有哪些禁忌？",
+                        "运动对血糖影响",
+                        "如何监测血糖变化？",
+                        "糖尿病并发症有哪些？",
+                        "胰岛素泵的适用性",
+                        "血糖高有哪些症状？",
+                    ],
+                    inputs=[text_input]
+                )
+                clear_btn = gr.Button("清除对话历史", elem_id="clear-btn", scale=1)
 
         # 右侧病例记录
         with gr.Column(scale=2):
             case_md = gr.Markdown("**病例记录**\n\n尚无内容")
+            gen_case_btn = gr.Button("生成病例报告单", elem_id="gen-case-btn")
 
-    state     = gr.State([])  # 聊天历史
-    file_list = gr.State([])  # 文件路径列表
+    state = gr.State([{"role": "assistant", "content": "您好，我是糖尿病专业助手，请您提供详细病例信息，以便我为您量身定制医学建议。"}])
 
     # 上传 -> 更新聊天 & 文件列表
     upload_btn.upload(
@@ -190,16 +250,28 @@ with gr.Blocks(css=css) as demo:
         inputs=[file_selector, file_list],
         outputs=[file_list, file_selector]
     )
-    # 发送 -> 生成回复&病例，并清空文件列表
+    # 发送 -> 生成回复，并清空文件列表和输入框
     send_btn.click(
         fn=on_send,
-        inputs=[text_input, file_list, state],
-        outputs=[chatbot, state, case_md, file_list, file_selector]
+        inputs=[text_input, file_list, state, name_input, age_input, weight_input, gender_input, history_input],
+        outputs=[chatbot, state, file_list, file_selector, text_input]
     )
     text_input.submit(
         fn=on_send,
-        inputs=[text_input, file_list, state],
-        outputs=[chatbot, state, case_md, file_list, file_selector]
+        inputs=[text_input, file_list, state, name_input, age_input, weight_input, gender_input, history_input],
+        outputs=[chatbot, state, file_list, file_selector, text_input]
+    )
+    # 清除对话历史按钮
+    clear_btn.click(
+        fn=on_clear_history,
+        inputs=None,
+        outputs=[chatbot, state, case_md]
+    )
+    # 生成病例报告单按钮
+    gen_case_btn.click(
+        fn=on_generate_case,
+        inputs=[state, name_input, age_input, weight_input, gender_input, history_input],
+        outputs=[case_md]
     )
 
 if __name__ == "__main__":
