@@ -5,6 +5,86 @@ import gradio as gr
 from client.zhipu_llm import ZhipuLLM
 import datetime
 
+
+KEY_MAP = {
+    "空腹血糖":       "空腹血糖(GLUO)",
+    "半小时血糖":     "半小时血糖(GLU0.5)",   # 如果解析器输出“半小时血糖”想填到“二小时血糖(GLU2)”里，请按需调整
+    "一小时血糖":     "一小时血糖(GLU1)",
+    "两小时血糖":     "两小时血糖(GLU2)",
+    "三小时血糖":     "三小时血糖(GLU3)",
+    "糖化血红蛋白":   "糖化血红蛋白(HbA1C)",
+    "空腹血糖(GLUO)": "空腹血糖",
+    "半小时血糖(GLUO0.5)":     "半小时血糖",   # 如果解析器输出“半小时血糖”想填到“二小时血糖(GLU2)”里，请按需调整
+    "一小时血糖(GLU1)":     "一小时血糖",
+    "两小时血糖(GLU2)":     "两小时血糖",
+    "三小时血糖(GLU3)":     "三小时血糖",
+    "糖化血红蛋白(HbA1C)":   "糖化血红蛋白",
+    "BMI":           "BMI",
+    "身高":           None,  # 不需要提示时可设为 None
+    "体重":           None,
+    "收缩压":         "血压收缩压",
+    "舒张压":         "血压舒张压",
+    "心率":           "静息心率",
+    "体温":           "体温",
+    # ……如有其它字段，按实际补充
+}
+
+INDICATORS = {
+    "症状": {
+        "prompt":
+            "为了更好地了解您的情况，"
+            "请您回想最近是否出现以下症状——"
+            "如口渴、排尿增多或食量明显增加？",
+        "value": None
+    },
+    "空腹血糖": {
+        "prompt":
+            "清晨空腹时（未进食至少8小时），"
+            "您的血糖大约是多少？"
+            "请直接输入数值（mmol/L）。",
+        "value": None
+    },
+    "两小时血糖": {
+        "prompt": "在进餐后两小时内测得的血糖值是多少？",
+        "value": None
+    },
+    "糖化血红蛋白": {
+        "prompt": "最近一次糖化血红蛋白（HbA1c）检测结果是多少？",
+        "value": None
+    },
+    "BMI": {
+        "prompt":
+            "BMI（体质指数）用于评估体重是否在健康范围，"
+            "与糖尿病风险密切相关。"
+            "请您告诉我您的 BMI 值（kg/m²，仅数字），",
+        "value": None
+    },
+    "血压收缩压": {
+        "prompt": "请提供收缩压 SBP（mmHg，仅数字）",
+        "value": None
+    },
+    "血压舒张压": {
+        "prompt": "请提供舒张压 DBP（mmHg，仅数字）",
+        "value": None
+    },
+    "静息心率": {
+        "prompt": "请提供静息心率 HR（次/分，仅数字）",
+        "value": None
+    },
+    "亲属糖尿病病史": {
+        "prompt": "您是否有一级亲属糖尿病病史或者家族史？",
+        "value": None
+    },
+    "其他重要说明": {
+        "prompt":
+            "如果您有正在使用的药物、特殊饮食或运动习惯等，"
+            "这会帮助我们更全面地了解您的健康状况。"
+            "请您补充其他重要说明：",
+        "value": None
+    }
+}
+
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s: %(message)s"
@@ -75,12 +155,16 @@ def on_file_upload(file_paths, history, file_list):
             history.append({"role":"system", "content":f"已上传图片：{name}\n\n{md}"})
             # 自动解析图片医学指标
             result = parse_lab_report(file_bytes)
+            print(result)
             # 自动遍历所有非空医学指标并展示（直接用中文key）
             if any(result.values()):
                 summary = []
                 for k, v in result.items():
                     if v is not None:
                         summary.append(f"{k}: {v}")
+                    if k in INDICATORS and v not in ("", None):
+                        INDICATORS[k]["value"] = str(v)
+                print(INDICATORS)
                 if summary:
                     history.append({"role": "system", "content": "自动识别信息：\n" + "\n".join(summary)})
         elif ext == "pdf":
@@ -111,28 +195,67 @@ def on_delete(selected, file_list):
 def on_send(text, file_list, history, name, age, weight, gender, past_history):
     history   = history or []
     user_msg  = text or ""
+
+    if file_list:
+        names = ", ".join(os.path.basename(p) for p in file_list)
+        suffix = f"[已上传文件：{names}]"
+        user_msg = f"{user_msg}\n{suffix}" if user_msg else suffix
+    history.append({"role":"user","content":user_msg})
+
+    
+    for key, info in INDICATORS.items():
+        prompt_text = info["prompt"]
+        value = info["value"]
+        # 打印调试信息可选
+        print(f"指标名：{key}，提示语：{prompt_text}，已填值：{value}")
+        if value is None:
+            # 把这个指标的 prompt 发给用户
+            history.append({
+                "role": "assistant",
+                "content": prompt_text
+            })
+            INDICATORS[key]["value"] = user_msg
+            return (
+                history,                                     
+                history,                                     
+                file_list,                                    
+                gr.update(choices=[os.path.basename(p) for p in file_list], value=[]), 
+                gr.update(value="")                          
+            )
+
+    # 仅拼接已上传文件信息
+    if file_list:
+        names = ", ".join(os.path.basename(p) for p in file_list)
+        user_msg = (user_msg + "\n" if user_msg else "") + f"[已上传文件：{names}]"
+    # 用户消息直接传递（前端不显示个人信息）
+    history.append({"role":"user","content":user_msg})
+
+    # 拼接个人信息（后端传给模型，不显示在聊天区）
+    personal_info = (
+        f"姓名：{name or '未填写'}；年龄：{age or '未填写'}；体重：{weight or '未填写'}；"
+        f"性别：{gender or '未填写'}；既往史：{past_history or '未填写'}"
+    )
+
     # 检查是否有图片/报告自动识别信息
     auto_info = None
     for m in reversed(history):
         if m["role"] == "system" and m["content"].startswith("自动识别信息："):
             auto_info = m["content"]
             break
-    if file_list:
-        names = ", ".join(os.path.basename(p) for p in file_list)
-        user_msg = (user_msg + "\n" if user_msg else "") + f"[已上传文件：{names}]"
-    # 用户消息直接传递
-    history.append({"role":"user","content":user_msg})
 
     # LLM 建议
     if auto_info:
-        # 有自动识别信息，优先让LLM基于图片/报告结构化内容给建议
         prompt = (
-            f"用户上传了医学报告或图片，系统自动识别出如下结构化信息：\n{auto_info}\n"
-            f"请基于这些医学信息，结合用户消息“{user_msg}”，给出专业的糖尿病检测/管理建议。"
+            f"用户个人信息：{personal_info}\n"
+            f"用户上传了医学报告或图片，系统自动识别出如下结构化信息：\n{auto_info}\n,并恢复在auto_info中了解了什么"
+            f"请基于这些医学信息，结合用户消息“{user_msg}”，并恢复在user_msg中了解了什么，不用解释了解的信息。"
             "如果信息不全可适当说明，但不要说无法识别图片。"
         )
     else:
-        prompt = f"用户消息：{user_msg}\n请基于此给出专业的糖尿病检测/管理建议。"
+        prompt = (
+            f"用户个人信息：{personal_info}\n"
+            f"用户消息：{user_msg}\n并恢复在user_msg中了解了什么，不用解释了解的信息。"
+        )
     logger.info("Prompt to LLM: %s", prompt)
     try: reply = llm._call(prompt)
     except Exception as e: reply = f"模型调用出错：{e}"
@@ -203,7 +326,7 @@ def on_generate_case(history, name=None, age=None, weight=None, gender=None, pas
     return case
 
 def on_clear_history():
-    welcome_msg = [{"role": "assistant", "content": "您好，我是糖尿病专业助手，请您提供详细病例信息，以便我为您量身定制医学建议。"}]
+    welcome_msg = [{"role": "assistant", "content": "您好，我是糖尿病专业助手，请您提供详细病例信息，以便我为您量身定制医学建议。你有关于最近的报告可以给我看看吗"}]
     return welcome_msg, welcome_msg, "**病例记录**\n\n尚无内容"
 
 with gr.Blocks(css=css) as demo:
