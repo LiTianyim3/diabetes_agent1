@@ -78,11 +78,56 @@ def on_file_upload(file_paths, history, file_list):
             # 自动遍历所有非空医学指标并展示（直接用中文key）
             if any(result.values()):
                 summary = []
+                user_features = {}
+                # key映射：中文key->数据集英文key
+                key_map = {
+                    "性别": "gender",
+                    "年龄": "age",
+                    "高血压": "hypertension",
+                    "心脏病": "heart_disease",
+                    "吸烟史": "smoking_history",
+                    "BMI": "bmi",
+                    "糖化血红蛋白": "HbA1c_level",
+                    "空腹血糖": "blood_glucose_level",
+                    "两小时血糖": "blood_glucose_level",
+                    "糖尿病": "diabetes",
+                }
+                import re
                 for k, v in result.items():
                     if v is not None:
                         summary.append(f"{k}: {v}")
+                        # 自动提取数值
+                        mapped_key = key_map.get(k, k)
+                        num = None
+                        if isinstance(v, (int, float)):
+                            num = v
+                        elif isinstance(v, str):
+                            match = re.search(r"[-+]?[0-9]*\.?[0-9]+", v)
+                            if match:
+                                try:
+                                    num = float(match.group())
+                                except Exception:
+                                    pass
+                        if num is not None:
+                            user_features[mapped_key] = num
                 if summary:
                     history.append({"role": "system", "content": "自动识别信息：\n" + "\n".join(summary)})
+                # 自动触发RAG检索
+                # RAG使用情况打印
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info(f"RAG特征映射结果: {user_features}")
+                if user_features:
+                    try:
+                        from rag.index_diabetes import generate_scientific_advice
+                        rag_info = generate_scientific_advice(user_features)
+                        logger.info(f"RAG检索结果: {rag_info}")
+                        history.append({"role": "system", "content": "【数据集相似病例参考】\n" + rag_info})
+                    except Exception as e:
+                        logger.info(f"RAG检索异常: {e}")
+                        history.append({"role": "system", "content": f"RAG检索失败：{e}"})
+                else:
+                    logger.info("RAG未调用：无有效数值型特征")
         elif ext == "pdf":
             md = f"[📄 {name}](data:application/pdf;base64,{b64})"
             history.append({"role":"system","content":f"已上传 PDF：{md}"})
@@ -123,19 +168,42 @@ def on_send(text, file_list, history, name, age, weight, gender, past_history):
     # 用户消息直接传递
     history.append({"role":"user","content":user_msg})
 
-    # LLM 建议
+    # 集成RAG数据集检索功能
+    scientific_advice = None
+    try:
+        # 自动识别信息转为dict
+        if auto_info:
+            import re, json
+            match = re.search(r"\{.*\}", auto_info, re.S)
+            if match:
+                features = json.loads(match.group())
+                # 只保留数值型特征
+                user_features = {k: v for k, v in features.items() if isinstance(v, (int, float)) and v is not None}
+                from rag.index_diabetes import generate_scientific_advice
+                scientific_advice = generate_scientific_advice(user_features)
+                logger.info(f"RAG检索结果: {scientific_advice}")
+    except Exception as e:
+        scientific_advice = f"RAG数据集检索失败：{e}"
+        logger.info(scientific_advice)
+
+    # LLM建议，优先融合RAG科学建议
     if auto_info:
-        # 有自动识别信息，优先让LLM基于图片/报告结构化内容给建议
+        rag_info = scientific_advice if scientific_advice else ''
+        if rag_info:
+            rag_info = f"【数据集参考】\n{rag_info}\n"
         prompt = (
             f"用户上传了医学报告或图片，系统自动识别出如下结构化信息：\n{auto_info}\n"
-            f"请基于这些医学信息，结合用户消息“{user_msg}”，给出专业的糖尿病检测/管理建议。"
+            f"{rag_info}"
+            f"请基于这些医学信息和数据集参考，结合用户消息“{user_msg}”，给出科学严谨的糖尿病检测/管理建议。"
             "如果信息不全可适当说明，但不要说无法识别图片。"
         )
     else:
         prompt = f"用户消息：{user_msg}\n请基于此给出专业的糖尿病检测/管理建议。"
     logger.info("Prompt to LLM: %s", prompt)
-    try: reply = llm._call(prompt)
-    except Exception as e: reply = f"模型调用出错：{e}"
+    try:
+        reply = llm._call(prompt)
+    except Exception as e:
+        reply = f"模型调用出错：{e}"
     history.append({"role":"assistant","content":reply})
 
     # 发送后清空已上传列表，不再自动生成病例
