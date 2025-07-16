@@ -8,50 +8,73 @@ def build_ui(
     on_generate_case
 ):
     css = """
-    #main-title {
-        font-size: 2.1rem;
-        font-weight: bold;
-        color: #d7263d;
-        margin-bottom: 0.5em;
-        letter-spacing: 1px;
+    body, .gradio-container {
+        background: linear-gradient(120deg, #e3f0ff 0%, #f8fbff 100%) !important;
+        min-height: 100vh;
+        font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif;
     }
-    .gr-box {
-        border-radius: 12px !important;
-        box-shadow: 0 2px 12px #eaeaea;
-        background: #fff;
+    #main-title {
+        font-size: 2.2rem;
+        font-weight: bold;
+        color: #1976d2;
+        margin-bottom: 0.7em;
+        letter-spacing: 1px;
+        text-shadow: 0 2px 8px #e3f0ff;
+    }
+    .gr-box, .gr-group, .gradio-container .gr-block.gr-box {
+        border-radius: 14px !important;
+        box-shadow: 0 2px 12px #e3f0ff;
+        background: #ffffff;
         padding: 18px 18px 10px 18px;
         margin-bottom: 18px;
+        border: none !important;
     }
-    .gr-input {
+    .gr-input, .gr-textbox, .gr-dropdown {
         border-radius: 8px !important;
-        border: 1px solid #e0e0e0 !important;
-        background: #fafbfc !important;
+        border: 1px solid #cfd8dc !important;
+        background: #f5faff !important;
+        font-size: 1.05rem;
+        min-height: 38px;
     }
     #personal-info-row {
-        margin-bottom: 0.5em;
+        margin-bottom: 0.7em;
+        gap: 1.2em;
     }
     #case-panel {
-        background: #f7fafd !important;
-        border-radius: 12px !important;
-        min-height: 320px;
+        background: #f5faff !important;
+        border-radius: 14px !important;
+        min-height: 340px;
         padding: 18px;
+        box-shadow: 0 2px 8px #e3f0ff;
     }
     #gen-case-btn {
-        background: linear-gradient(90deg, #d7263d 0%, #f46036 100%);
+        background: linear-gradient(90deg, #1976d2 0%, #64b5f6 100%);
         color: #fff !important;
         font-weight: bold;
         border-radius: 8px !important;
-        margin-top: 1.5em;
-        min-height: 48px;
-        font-size: 1.1rem;
+        margin-top: 1.2em;
+        min-height: 44px;
+        font-size: 1.08rem;
+        box-shadow: 0 2px 8px #1976d222;
+        border: none !important;
+        transition: background 0.2s;
+    }
+    #gen-case-btn:hover {
+        background: linear-gradient(90deg, #64b5f6 0%, #1976d2 100%);
     }
     #clear-btn {
-        min-width: 80px;
-        max-width: 180px;
-        background: #f5f5f5 !important;
-        color: #d7263d !important;
+        min-width: 90px;
+        max-width: 200px;
+        background: #e3f0ff !important;
+        color: #1976d2 !important;
         border-radius: 8px !important;
         font-weight: bold;
+        border: none !important;
+        box-shadow: 0 1px 4px #e3f0ff;
+    }
+    #clear-btn:hover {
+        background: #bbdefb !important;
+        color: #0d47a1 !important;
     }
     #file-selector .gr-checkbox {
         padding: 8px 8px 8px 28px;
@@ -70,13 +93,31 @@ def build_ui(
         cursor: pointer;
     }
     #file-selector .gr-checkbox:hover {
-        background-color: #f5f5f5;
+        background-color: #e3f0ff;
+    }
+    .gradio-container .gr-block.gr-chatbot {
+        background: #f5faff !important;
+        border-radius: 14px !important;
+        box-shadow: 0 2px 8px #e3f0ff;
+    }
+    .gradio-container .gr-block.gr-markdown {
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+    }
+    .gradio-container .gr-block label {
+        font-weight: 500;
+        color: #1976d2;
+        font-size: 1.05rem;
+    }
+    .gradio-container .gr-block input, .gradio-container .gr-block textarea {
+        font-size: 1.05rem;
     }
     """
 
     with gr.Blocks(css=css) as demo:
         gr.Markdown(
-            "<div id='main-title'>糖尿病助手 🩸 <span style='font-size:1.2rem;font-weight:normal;color:#222;'>— 左：对话交互；右：病例记录</span></div>"
+            "<div id='main-title'>糖尿病助手 🩸 <span style='font-size:1.5rem;font-weight:normal;color:#222;'>— 左：对话交互  — 右：病例记录</span></div>"
         )
 
         with gr.Row(elem_id="personal-info-row"):
@@ -88,7 +129,7 @@ def build_ui(
 
         with gr.Row():
             with gr.Column(scale=3):
-                with gr.Group():  # 替换 gr.Box
+                with gr.Group():
                     chatbot = gr.Chatbot(
                         type="messages",
                         label="对话记录",
@@ -126,10 +167,7 @@ def build_ui(
                             "低血糖处理方式",
                             "我最近血糖有点高，怎么缓解？",
                             "糖尿病饮食有哪些禁忌？",
-                            "运动对血糖影响",
-                            "如何监测血糖变化？",
                             "糖尿病并发症有哪些？",
-                            "胰岛素泵的适用性",
                             "血糖高有哪些症状？",
                         ],
                         inputs=[text_input]
@@ -137,15 +175,13 @@ def build_ui(
                     clear_btn = gr.Button("清除对话历史", elem_id="clear-btn", scale=1)
 
             with gr.Column(scale=2):
-                with gr.Group(elem_id="case-panel"):  # 替换 gr.Box
+                with gr.Group(elem_id="case-panel"):
                     case_md = gr.Markdown("**病例记录**\n\n尚无内容")
                 gen_case_btn = gr.Button("生成病例报告单", elem_id="gen-case-btn")
 
-        # 状态（本地定义）
         file_list = gr.State([])
         state = gr.State([{"role": "assistant", "content": "您好，我是糖尿病专业助手，请您提供详细病例信息，以便我为您量身定制医学建议。"}])
 
-        # 事件绑定
         upload_btn.upload(
             fn=on_file_upload,
             inputs=[upload_btn, state, file_list],
