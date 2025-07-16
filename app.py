@@ -4,6 +4,8 @@ import logging
 import gradio as gr
 from client.zhipu_llm import ZhipuLLM
 import datetime
+from tools.case_json_manager import save_case_json
+import json
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,9 +41,9 @@ css = """
   background-color: #f5f5f5;
 }
 /* 限制清除按钮宽度 */
-#clear-btn {s
-  min-width: 50px;
-  max-width: 80px;
+#clear-btn {
+  min-width: 30px;
+  max-width: 60px;
 }
 """
 
@@ -156,17 +158,25 @@ def on_delete(selected, file_list):
 def on_send(text, file_list, history, name, age, weight, gender, past_history):
     history   = history or []
     user_msg  = text or ""
+    # 仅拼接已上传文件信息
+    if file_list:
+        names = ", ".join(os.path.basename(p) for p in file_list)
+        user_msg = (user_msg + "\n" if user_msg else "") + f"[已上传文件：{names}]"
+    # 用户消息直接传递（前端不显示个人信息）
+    history.append({"role":"user","content":user_msg})
+
+    # 拼接个人信息（后端传给模型，不显示在聊天区）
+    personal_info = (
+        f"姓名：{name or '未填写'}；年龄：{age or '未填写'}；体重：{weight or '未填写'}；"
+        f"性别：{gender or '未填写'}；既往史：{past_history or '未填写'}"
+    )
+
     # 检查是否有图片/报告自动识别信息
     auto_info = None
     for m in reversed(history):
         if m["role"] == "system" and m["content"].startswith("自动识别信息："):
             auto_info = m["content"]
             break
-    if file_list:
-        names = ", ".join(os.path.basename(p) for p in file_list)
-        user_msg = (user_msg + "\n" if user_msg else "") + f"[已上传文件：{names}]"
-    # 用户消息直接传递
-    history.append({"role":"user","content":user_msg})
 
     # 集成RAG数据集检索功能
     scientific_advice = None
@@ -188,17 +198,24 @@ def on_send(text, file_list, history, name, age, weight, gender, past_history):
 
     # LLM建议，优先融合RAG科学建议
     if auto_info:
+<<<<<<< HEAD
         rag_info = scientific_advice if scientific_advice else ''
         if rag_info:
             rag_info = f"【数据集参考】\n{rag_info}\n"
+=======
+>>>>>>> origin/LJ
         prompt = (
+            f"用户个人信息：{personal_info}\n"
             f"用户上传了医学报告或图片，系统自动识别出如下结构化信息：\n{auto_info}\n"
             f"{rag_info}"
             f"请基于这些医学信息和数据集参考，结合用户消息“{user_msg}”，给出科学严谨的糖尿病检测/管理建议。"
             "如果信息不全可适当说明，但不要说无法识别图片。"
         )
     else:
-        prompt = f"用户消息：{user_msg}\n请基于此给出专业的糖尿病检测/管理建议。"
+        prompt = (
+            f"用户个人信息：{personal_info}\n"
+            f"用户消息：{user_msg}\n请基于此给出专业的糖尿病检测/管理建议。"
+        )
     logger.info("Prompt to LLM: %s", prompt)
     try:
         reply = llm._call(prompt)
@@ -210,13 +227,65 @@ def on_send(text, file_list, history, name, age, weight, gender, past_history):
     return history, history, [], gr.update(choices=[], value=[]), gr.update(value="")
 
 def on_generate_case(history, name=None, age=None, weight=None, gender=None, past_history=None):
-    if not history or len(history) == 0:
-        return "**病例记录**\n\n尚无内容"
-    hist = "\n".join(f"{m['role']}: {m['content']}" for m in history)
+    info_filled = any([name, age, weight, gender, past_history])
+    dialog_filled = history and any(
+        m["role"] == "user" and m["content"].strip() for m in history if m["role"] == "user"
+    )
+
+    # 情况1：个人信息和对话都没有
+    if not info_filled and not dialog_filled:
+        return "没有信息可以生成病例报告单，请先填写个人信息或进行对话。"
+
+    # 情况2：只有个人信息
+    if info_filled and not dialog_filled:
+        case_dict = {
+            "姓名": name or "未填写",
+            "年龄": age or "未填写",
+            "体重": weight or "未填写",
+            "性别": gender or "未填写",
+            "既往史": past_history or "未填写"
+        }
+        save_case_json(case_dict, name, DATA_DIR)
+        personal_info = (
+            f"姓名：{case_dict['姓名']}\n"
+            f"年龄：{case_dict['年龄']}\n"
+            f"体重：{case_dict['体重']}\n"
+            f"性别：{case_dict['性别']}\n"
+            f"既往史：{case_dict['既往史']}"
+        )
+        return f"**病例报告单**\n\n{personal_info}"
+
+    # 情况3：只有对话内容
+    if not info_filled and dialog_filled:
+        personal_info = {
+            "姓名": "无", "年龄": "无", "体重": "无", "性别": "无", "既往史": "无"
+        }
+        hist = "\n".join(f"{m['role']}: {m['content']}" for m in history)
+        case_p = (
+            f"请根据以下对话生成结构化糖尿病病例：\n\n"
+            f"姓名：无\n年龄：无\n体重：无\n性别：无\n既往史：无\n\n{hist}\n\n"
+            "病例应包括：用户个人信息(姓名，年龄，体重，性别)、主诉、现病史、既往史、检查结果、初步诊断、管理建议。控制字数在500字之内"
+        )
+        logger.info("Case prompt to LLM: %s", case_p)
+        try:
+            case = llm._call(case_p)
+        except Exception as e:
+            case = f"生成病例出错：{e}"
+            return case
+        # 尝试解析为 dict 并保存
+        try:
+            case_dict = json.loads(case)
+        except Exception:
+            case_dict = {"内容": case}
+        save_case_json(case_dict, None, DATA_DIR)
+        return case
+
+    # 情况4：个人信息和对话都有
     personal_info = (
         f"姓名：{name or '未填写'}；年龄：{age or '未填写'}；体重：{weight or '未填写'}；"
         f"性别：{gender or '未填写'}；既往史：{past_history or '未填写'}"
     )
+    hist = "\n".join(f"{m['role']}: {m['content']}" for m in history)
     case_p = (
         f"请根据以下对话和个人信息生成结构化糖尿病病例：\n\n"
         f"{personal_info}\n\n{hist}\n\n"
@@ -228,6 +297,12 @@ def on_generate_case(history, name=None, age=None, weight=None, gender=None, pas
     except Exception as e:
         case = f"生成病例出错：{e}"
         return case
+    # 尝试解析为 dict 并保存
+    try:
+        case_dict = json.loads(case)
+    except Exception:
+        case_dict = {"内容": case}
+    save_case_json(case_dict, name, DATA_DIR)
     return case
 
 def on_clear_history():
