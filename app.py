@@ -111,28 +111,39 @@ def on_delete(selected, file_list):
 def on_send(text, file_list, history, name, age, weight, gender, past_history):
     history   = history or []
     user_msg  = text or ""
+    # 仅拼接已上传文件信息
+    if file_list:
+        names = ", ".join(os.path.basename(p) for p in file_list)
+        user_msg = (user_msg + "\n" if user_msg else "") + f"[已上传文件：{names}]"
+    # 用户消息直接传递（前端不显示个人信息）
+    history.append({"role":"user","content":user_msg})
+
+    # 拼接个人信息（后端传给模型，不显示在聊天区）
+    personal_info = (
+        f"姓名：{name or '未填写'}；年龄：{age or '未填写'}；体重：{weight or '未填写'}；"
+        f"性别：{gender or '未填写'}；既往史：{past_history or '未填写'}"
+    )
+
     # 检查是否有图片/报告自动识别信息
     auto_info = None
     for m in reversed(history):
         if m["role"] == "system" and m["content"].startswith("自动识别信息："):
             auto_info = m["content"]
             break
-    if file_list:
-        names = ", ".join(os.path.basename(p) for p in file_list)
-        user_msg = (user_msg + "\n" if user_msg else "") + f"[已上传文件：{names}]"
-    # 用户消息直接传递
-    history.append({"role":"user","content":user_msg})
 
     # LLM 建议
     if auto_info:
-        # 有自动识别信息，优先让LLM基于图片/报告结构化内容给建议
         prompt = (
+            f"用户个人信息：{personal_info}\n"
             f"用户上传了医学报告或图片，系统自动识别出如下结构化信息：\n{auto_info}\n"
             f"请基于这些医学信息，结合用户消息“{user_msg}”，给出专业的糖尿病检测/管理建议。"
             "如果信息不全可适当说明，但不要说无法识别图片。"
         )
     else:
-        prompt = f"用户消息：{user_msg}\n请基于此给出专业的糖尿病检测/管理建议。"
+        prompt = (
+            f"用户个人信息：{personal_info}\n"
+            f"用户消息：{user_msg}\n请基于此给出专业的糖尿病检测/管理建议。"
+        )
     logger.info("Prompt to LLM: %s", prompt)
     try: reply = llm._call(prompt)
     except Exception as e: reply = f"模型调用出错：{e}"
