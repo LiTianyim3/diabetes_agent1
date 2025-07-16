@@ -4,6 +4,12 @@ import logging
 import gradio as gr
 from client.zhipu_llm import ZhipuLLM
 import datetime
+from neo4j import GraphDatabase
+
+neo_driver = GraphDatabase.driver(
+    "bolt://localhost:7687",
+    auth=("neo4j", "415zc415")
+)
 
 
 KEY_MAP = {
@@ -124,6 +130,118 @@ css = """
   max-width: 60px;
 }
 """
+
+QUESTIONS = [
+    "1/4 您是否有多尿、多饮、多食等高血糖症状？（有 / 无）",
+    "2/4 您的空腹血糖（FPG）是多少？（mmol/L）",
+    "3/4 您的餐后 2 小时血糖是多少？（mmol/L）",
+    "4/4 您的 HbA1c（糖化血红蛋白）是多少？（%）",
+]
+
+def _query_graph(answers: dict):
+    """
+    answers = {"sym": "有/无", "fpg": "7.8", "pp2h": "12.0", "hb": "6.8"}
+    返回去重后的诊断名称列表（可能为空）
+    """
+    cypher = """
+    WITH $sym AS sym,
+         toFloat($fpg)  AS fpg,
+         toFloat($pp2h) AS pp2h,
+         toFloat($hb)   AS hb
+    OPTIONAL MATCH (s:Symptom {name:'典型高血糖症状'})-[:LEADS_TO]->(d1:Diagnosis)
+      WHERE sym = '有'
+    OPTIONAL MATCH (i1:Indicator {name:'FPG'})-[:LEADS_TO]->(d2:Diagnosis)
+      WHERE fpg >= i1.threshold
+    OPTIONAL MATCH (i2:Indicator {name:'PostPrandial2H'})-[:LEADS_TO]->(d3:Diagnosis)
+      WHERE pp2h >= i2.threshold
+    OPTIONAL MATCH (i3:Indicator {name:'HbA1c'})-[:LEADS_TO]->(d4:Diagnosis)
+      WHERE hb >= i3.threshold
+    RETURN
+      collect(d1.name) + collect(d2.name) +
+      collect(d3.name) + collect(d4.name) AS all_names
+    """
+    with neo_driver.session(bookmarks=None) as s:
+        rec = s.run(cypher, **answers).single()
+        raw = rec["all_names"] if rec else []
+        # 过滤 None / 空串，再去重
+        return list({n for n in raw if n})
+
+def gen_followup_question(answers: dict, asked: list[str]) -> str:
+    """
+    answers : 已收集的回答 dict
+    asked   : 已经问过的问题文本列表
+    """
+    prompt = (
+        "你是一名内分泌科医生，正在做糖尿病问诊。\n"
+        "以下问题已经问过，禁止重复：\n" +
+        "\n".join(f"- {q}" for q in asked) + "\n\n"
+        "已获回答：\n"
+        f"典型症状={answers.get(0,'未回答')}；"
+        f"FPG={answers.get(1,'未回答')}；"
+        f"餐后2h={answers.get(2,'未回答')}；"
+        f"HbA1c={answers.get(3,'未回答')}\n"
+        "请提出下一条最关键且不重复的问题，"
+        "要求：用中文、简洁，且只输出问题本身。"
+    )
+    try:
+        q = llm._call(prompt).strip()
+    except Exception:
+        q = ""
+    return q or "请提供其他与血糖相关的检查或症状信息？"
+
+def guided_on_send(text, file_list, history_state,
+                   name, age, weight, gender, past_history):
+    history, step, answers = history_state
+    user_text = (text or "").strip()
+
+    # 收集上一步回答
+    if step > 0:
+        answers[step-1] = user_text
+        history.append({"role":"user","content":user_text})
+
+    # 还没问完 ⇒ 继续提问
+    if step < len(QUESTIONS):
+        q = QUESTIONS[step]
+        history.append({"role":"assistant","content":q})
+        step += 1
+        return history, (history, step, answers), file_list, gr.update(), gr.update(value="")
+
+    diag_list = _query_graph({
+        "sym":  answers.get(0, "无"),
+        "fpg":  answers.get(1, "0"),
+        "pp2h": answers.get(2, "0"),
+        "hb":   answers.get(3, "0")
+    })
+    MAX_EXTRA_QUESTIONS = 5   # 最多继续追问 5 次
+    MAX_RETRY = 3          # 生成不重复问题最多重试 3 次
+    
+    if diag_list:
+        reply = "初步可能诊断类型：" + "、".join(diag_list)
+        history.append({"role":"assistant","content":reply})
+        # 结束：重置 state
+        new_state = ([{"role":"assistant","content":"如需再次问诊，请输入任意内容。"}], 0, {})
+        return history, new_state, [], gr.update(), gr.update(value="")
+
+    # ── 若仍未诊断，自动生成下一条问题 ──
+    if step - 4 >= MAX_EXTRA_QUESTIONS:
+        reply = "已追问多次仍无法给出诊断，建议携带完整检查报告就医。"
+        history.append({"role":"assistant","content":reply})
+        new_state = ([{"role":"assistant","content":"如需再次问诊，请输入任意内容。"}], 0, {})
+        return history, new_state, [], gr.update(), gr.update(value="")
+
+    asked_texts = [m["content"] for m in history if m["role"] == "assistant" and m["content"].endswith("？")]
+    for _ in range(MAX_RETRY):
+        next_q = gen_followup_question(answers, asked_texts)
+        if next_q not in asked_texts:
+            break
+    else:  # 三次都重复，就给兜底问题
+        next_q = "请告诉我任何最近血糖相关的异常检查项目？"
+
+    history.append({"role":"assistant","content":next_q})
+    step += 1
+    return history, (history, step, answers), file_list, gr.update(), gr.update(value="")
+
+
 
 def on_file_upload(file_paths, history, file_list):
     history   = history   or []
@@ -454,7 +572,8 @@ with gr.Blocks(css=css) as demo:
             case_md = gr.Markdown("**病例记录**\n\n尚无内容")
             gen_case_btn = gr.Button("生成病例报告单", elem_id="gen-case-btn")
 
-    state = gr.State([{"role": "assistant", "content": "您好，我是糖尿病专业助手，请您提供详细病例信息，以便我为您量身定制医学建议。"}])
+    init_msg = [{"role":"assistant","content":"您好，我是糖尿病智能问诊助手，开始问诊。"}]
+    state = gr.State((init_msg, 0, {}))   # (history, step, answers)
 
     # 上传 -> 更新聊天 & 文件列表
     upload_btn.upload(
@@ -470,12 +589,12 @@ with gr.Blocks(css=css) as demo:
     )
     # 发送 -> 生成回复，并清空文件列表和输入框
     send_btn.click(
-        fn=on_send,
+        fn=guided_on_send,
         inputs=[text_input, file_list, state, name_input, age_input, weight_input, gender_input, history_input],
         outputs=[chatbot, state, file_list, file_selector, text_input]
     )
     text_input.submit(
-        fn=on_send,
+        fn=guided_on_send,
         inputs=[text_input, file_list, state, name_input, age_input, weight_input, gender_input, history_input],
         outputs=[chatbot, state, file_list, file_selector, text_input]
     )
