@@ -159,14 +159,48 @@ def on_file_upload(file_paths, history, file_list):
             # 自动遍历所有非空医学指标并展示（直接用中文key）
             if any(result.values()):
                 summary = []
+                user_features = {}
+                # key映射：中文key->数据集英文key
+                key_map = {
+                    "性别": "gender",
+                    "年龄": "age",
+                    "高血压": "hypertension",
+                    "心脏病": "heart_disease",
+                    "吸烟史": "smoking_history",
+                    "BMI": "bmi",
+                    "糖化血红蛋白": "HbA1c_level",
+                    "空腹血糖": "blood_glucose_level",
+                    "两小时血糖": "blood_glucose_level",
+                    "糖尿病": "diabetes",
+                    # 可根据实际数据集继续补充
+                }
+                import re
                 for k, v in result.items():
                     if v is not None:
                         summary.append(f"{k}: {v}")
-                    if k in INDICATORS and v not in ("", None):
-                        INDICATORS[k]["value"] = str(v)
-                print(INDICATORS)
+                        mapped_key = key_map.get(k, k)
+                        num = None
+                        try:
+                            num = float(v)
+                        except Exception:
+                            match = re.search(r"[-+]?[0-9]*\\.?[0-9]+", str(v))
+                            if match:
+                                try:
+                                    num = float(match.group())
+                                except Exception:
+                                    pass
+                        if num is not None:
+                            user_features[mapped_key] = num
+                        # 自动填充到INDICATORS value字段
+                        if k in INDICATORS and v not in (None, ""):
+                            INDICATORS[k]["value"] = str(v)
                 if summary:
-                    history.append({"role": "system", "content": "自动识别信息：\n" + "\n".join(summary)})
+                    history.append({"role": "system", "content": "自动识别信息：\n" + "\\n".join(summary)})
+                # 自动触发RAG检索
+                if user_features:
+                    from rag.index_diabetes import generate_scientific_advice
+                    rag_info = generate_scientific_advice(user_features)
+                    history.append({"role": "system", "content": "【数据集相似病例参考】\n" + rag_info})
         elif ext == "pdf":
             md = f"[📄 {name}](data:application/pdf;base64,{b64})"
             history.append({"role":"system","content":f"已上传 PDF：{md}"})
@@ -203,25 +237,37 @@ def on_send(text, file_list, history, name, age, weight, gender, past_history):
     history.append({"role":"user","content":user_msg})
 
     
+    # 优先判断是否有自动识别的数值型指标
+    auto_features = {}
     for key, info in INDICATORS.items():
-        prompt_text = info["prompt"]
         value = info["value"]
-        # 打印调试信息可选
-        print(f"指标名：{key}，提示语：{prompt_text}，已填值：{value}")
-        if value is None:
-            # 把这个指标的 prompt 发给用户
-            history.append({
-                "role": "assistant",
-                "content": prompt_text
-            })
-            INDICATORS[key]["value"] = user_msg
-            return (
-                history,                                     
-                history,                                     
-                file_list,                                    
-                gr.update(choices=[os.path.basename(p) for p in file_list], value=[]), 
-                gr.update(value="")                          
-            )
+        try:
+            num = float(value)
+            auto_features[key] = num
+        except Exception:
+            pass
+    if auto_features:
+        # 已有自动识别数值，直接进入LLM建议和RAG
+        pass
+    else:
+        # 没有自动识别数值，逐项问询
+        for key, info in INDICATORS.items():
+            prompt_text = info["prompt"]
+            value = info["value"]
+            print(f"指标名：{key}，提示语：{prompt_text}，已填值：{value}")
+            if value is None:
+                history.append({
+                    "role": "assistant",
+                    "content": prompt_text
+                })
+                INDICATORS[key]["value"] = user_msg
+                return (
+                    history,                                     
+                    history,                                     
+                    file_list,                                   
+                    gr.update(choices=[os.path.basename(p) for p in file_list], value=[]), 
+                    gr.update(value="")                         
+                )
 
     # 仅拼接已上传文件信息
     if file_list:
@@ -245,12 +291,18 @@ def on_send(text, file_list, history, name, age, weight, gender, past_history):
 
     # LLM 建议
     if auto_info:
-        rag_info = scientific_advice if scientific_advice else ''
+        # 从history中查找rag检索结果
+        rag_info = ''
+        for m in reversed(history):
+            if m["role"] == "system" and m["content"].startswith("【数据集相似病例参考】"):
+                rag_info = m["content"]
+                break
         if rag_info:
-            rag_info = f"【数据集参考】\n{rag_info}\n"
+            rag_info = f"{rag_info}\n"
         prompt = (
             f"用户个人信息：{personal_info}\n"
-            f"用户上传了医学报告或图片，系统自动识别出如下结构化信息：\n{auto_info}\n,并恢复在auto_info中了解了什么"
+            f"用户上传了医学报告或图片，系统自动识别出如下结构化信息：\n{auto_info}\n"
+            f"{rag_info}"
             f"请基于这些医学信息，结合用户消息“{user_msg}”，并恢复在user_msg中了解了什么，不用解释了解的信息。"
             "如果信息不全可适当说明，但不要说无法识别图片。"
         )
