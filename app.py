@@ -198,12 +198,6 @@ def on_send(text, file_list, history, name, age, weight, gender, past_history):
 
     # LLM建议，优先融合RAG科学建议
     if auto_info:
-<<<<<<< HEAD
-        rag_info = scientific_advice if scientific_advice else ''
-        if rag_info:
-            rag_info = f"【数据集参考】\n{rag_info}\n"
-=======
->>>>>>> origin/LJ
         prompt = (
             f"用户个人信息：{personal_info}\n"
             f"用户上传了医学报告或图片，系统自动识别出如下结构化信息：\n{auto_info}\n"
