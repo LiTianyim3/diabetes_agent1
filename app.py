@@ -39,9 +39,9 @@ css = """
   background-color: #f5f5f5;
 }
 /* 限制清除按钮宽度 */
-#clear-btn {s
-  min-width: 50px;
-  max-width: 80px;
+#clear-btn {
+  min-width: 30px;
+  max-width: 60px;
 }
 """
 
@@ -106,13 +106,53 @@ def on_send(text, file_list, history, name, age, weight, gender, past_history):
     return history, history, [], gr.update(choices=[], value=[]), gr.update(value="")
 
 def on_generate_case(history, name=None, age=None, weight=None, gender=None, past_history=None):
-    if not history or len(history) == 0:
-        return "**病例记录**\n\n尚无内容"
-    hist = "\n".join(f"{m['role']}: {m['content']}" for m in history)
+    # 判断个人信息是否填写
+    info_filled = any([name, age, weight, gender, past_history])
+    # 判断是否有对话内容（排除初始欢迎语）
+    dialog_filled = history and any(
+        m["role"] == "user" and m["content"].strip() for m in history if m["role"] == "user"
+    )
+
+    # 情况1：个人信息和对话都没有
+    if not info_filled and not dialog_filled:
+        return "没有信息可以生成病例报告单，请先填写个人信息或进行对话。"
+
+    # 情况2：只有个人信息
+    if info_filled and not dialog_filled:
+        personal_info = (
+            f"姓名：{name or '未填写'}\n"
+            f"年龄：{age or '未填写'}\n"
+            f"体重：{weight or '未填写'}\n"
+            f"性别：{gender or '未填写'}\n"
+            f"既往史：{past_history or '未填写'}"
+        )
+        return f"**病例报告单**\n\n{personal_info}"
+
+    # 情况3：只有对话内容
+    if not info_filled and dialog_filled:
+        personal_info = (
+            f"姓名：无\n年龄：无\n体重：无\n性别：无\n既往史：无"
+        )
+        hist = "\n".join(f"{m['role']}: {m['content']}" for m in history)
+        case_p = (
+            f"请根据以下对话生成结构化糖尿病病例：\n\n"
+            f"{personal_info}\n\n{hist}\n\n"
+            "病例应包括：用户个人信息(姓名，年龄，体重，性别)、主诉、现病史、既往史、检查结果、初步诊断、管理建议。控制字数在500字之内"
+        )
+        logger.info("Case prompt to LLM: %s", case_p)
+        try:
+            case = llm._call(case_p)
+        except Exception as e:
+            case = f"生成病例出错：{e}"
+            return case
+        return case
+
+    # 情况4：个人信息和对话都有
     personal_info = (
         f"姓名：{name or '未填写'}；年龄：{age or '未填写'}；体重：{weight or '未填写'}；"
         f"性别：{gender or '未填写'}；既往史：{past_history or '未填写'}"
     )
+    hist = "\n".join(f"{m['role']}: {m['content']}" for m in history)
     case_p = (
         f"请根据以下对话和个人信息生成结构化糖尿病病例：\n\n"
         f"{personal_info}\n\n{hist}\n\n"
