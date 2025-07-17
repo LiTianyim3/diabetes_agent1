@@ -32,6 +32,10 @@ KEY_MAP = {
 }
 
 INDICATORS = {
+    "年龄": {
+        "prompt": "请提供您的年龄（岁，仅数字）",
+        "value": None
+    },
     "症状": {
         "prompt":
             "为了更好地了解您的情况，"
@@ -111,60 +115,7 @@ KEY_MAP = {
     # ……如有其它字段，按实际补充
 }
 
-INDICATORS = {
-    "症状": {
-        "prompt":
-            "为了更好地了解您的情况，"
-            "请您回想最近是否出现以下症状——"
-            "如口渴、排尿增多或食量明显增加？",
-        "value": None
-    },
-    "空腹血糖": {
-        "prompt":
-            "清晨空腹时（未进食至少8小时），"
-            "您的血糖大约是多少？"
-            "请直接输入数值（mmol/L）。",
-        "value": None
-    },
-    "两小时血糖": {
-        "prompt": "在进餐后两小时内测得的血糖值是多少？",
-        "value": None
-    },
-    "糖化血红蛋白": {
-        "prompt": "最近一次糖化血红蛋白（HbA1c）检测结果是多少？",
-        "value": None
-    },
-    "BMI": {
-        "prompt":
-            "BMI（体质指数）用于评估体重是否在健康范围，"
-            "与糖尿病风险密切相关。"
-            "请您告诉我您的 BMI 值（kg/m²，仅数字），",
-        "value": None
-    },
-    "血压收缩压": {
-        "prompt": "请提供收缩压 SBP（mmHg，仅数字）",
-        "value": None
-    },
-    "血压舒张压": {
-        "prompt": "请提供舒张压 DBP（mmHg，仅数字）",
-        "value": None
-    },
-    "静息心率": {
-        "prompt": "请提供静息心率 HR（次/分，仅数字）",
-        "value": None
-    },
-    "亲属糖尿病病史": {
-        "prompt": "您是否有一级亲属糖尿病病史或者家族史？",
-        "value": None
-    },
-    "其他重要说明": {
-        "prompt":
-            "如果您有正在使用的药物、特殊饮食或运动习惯等，"
-            "这会帮助我们更全面地了解您的健康状况。"
-            "请您补充其他重要说明：",
-        "value": None
-    }
-}
+## 已删除重复的 INDICATORS 定义，保留前面含“年龄”字段的版本
 
 
 logging.basicConfig(
@@ -305,7 +256,6 @@ def on_file_upload(file_paths, history, file_list):
                 for k, v in result.items():
                     if v is not None:
                         summary.append(f"{k}: {v}")
-<<<<<<< HEAD
                         mapped_key = key_map.get(k, k)
                         num = None
                         try:
@@ -322,11 +272,6 @@ def on_file_upload(file_paths, history, file_list):
                         # 自动填充到INDICATORS value字段
                         if k in INDICATORS and v not in (None, ""):
                             INDICATORS[k]["value"] = str(v)
-=======
-                    if k in INDICATORS and v not in ("", None):
-                        INDICATORS[k]["value"] = str(v)
-                print(INDICATORS)
->>>>>>> origin/master
                 if summary:
                     history.append({"role": "system", "content": "自动识别信息：\n" + "\\n".join(summary)})
                 # 自动触发RAG检索
@@ -360,18 +305,34 @@ def on_delete(selected, file_list):
     return remaining, gr.update(choices=opts, value=[])
 
 def on_send(text, file_list, history, name, age, weight, gender, past_history):
-    history   = history or []
-    user_msg  = text or ""
 
+    history = history or []
+    user_msg = text or ""
+    # 文件上传信息合并到user_msg
     if file_list:
         names = ", ".join(os.path.basename(p) for p in file_list)
         suffix = f"[已上传文件：{names}]"
         user_msg = f"{user_msg}\n{suffix}" if user_msg else suffix
-    history.append({"role":"user","content":user_msg})
+    history.append({"role": "user", "content": user_msg})
 
-    
-<<<<<<< HEAD
-    # 优先判断是否有自动识别的数值型指标
+    # 自动抽取医学指标
+    import re
+    indicator_patterns = {
+        "年龄": r"(年龄|age)[^\d]*(\d{1,3})",
+        "空腹血糖": r"(空腹血糖|血糖值|血糖)[^\d]*(\d+(?:\.\d+)?)",
+        "两小时血糖": r"(两小时血糖|2h血糖)[^\d]*(\d+(?:\.\d+)?)",
+        "糖化血红蛋白": r"(糖化血红蛋白|HbA1c)[^\d]*(\d+(?:\.\d+)?)",
+        "BMI": r"(BMI|bmi|体质指数)[^\d]*(\d+(?:\.\d+)?)",
+        "血压收缩压": r"(收缩压|SBP)[^\d]*(\d+(?:\.\d+)?)",
+        "血压舒张压": r"(舒张压|DBP)[^\d]*(\d+(?:\.\d+)?)",
+        "静息心率": r"(心率|静息心率|HR)[^\d]*(\d+(?:\.\d+)?)",
+    }
+    for k, pat in indicator_patterns.items():
+        if INDICATORS.get(k, {}).get("value") in (None, ""):
+            m = re.search(pat, user_msg, re.IGNORECASE)
+            if m:
+                INDICATORS[k]["value"] = m.group(2)
+
     auto_features = {}
     for key, info in INDICATORS.items():
         value = info["value"]
@@ -380,61 +341,23 @@ def on_send(text, file_list, history, name, age, weight, gender, past_history):
             auto_features[key] = num
         except Exception:
             pass
-    if auto_features:
-        # 已有自动识别数值，直接进入LLM建议和RAG
-        pass
-    else:
-        # 没有自动识别数值，逐项问询
-        for key, info in INDICATORS.items():
-            prompt_text = info["prompt"]
-            value = info["value"]
-            print(f"指标名：{key}，提示语：{prompt_text}，已填值：{value}")
-            if value is None:
-                history.append({
-                    "role": "assistant",
-                    "content": prompt_text
-                })
-                INDICATORS[key]["value"] = user_msg
-                return (
-                    history,                                     
-                    history,                                     
-                    file_list,                                   
-                    gr.update(choices=[os.path.basename(p) for p in file_list], value=[]), 
-                    gr.update(value="")                         
-                )
-=======
-    for key, info in INDICATORS.items():
-        prompt_text = info["prompt"]
-        value = info["value"]
-        # 打印调试信息可选
-        print(f"指标名：{key}，提示语：{prompt_text}，已填值：{value}")
-        if value is None:
-            # 把这个指标的 prompt 发给用户
-            history.append({
-                "role": "assistant",
-                "content": prompt_text
-            })
-            INDICATORS[key]["value"] = user_msg
-            return (
-                history,                                     
-                history,                                     
-                file_list,                                    
-                gr.update(choices=[os.path.basename(p) for p in file_list], value=[]), 
-                gr.update(value="")                          
-            )
->>>>>>> origin/master
 
-    # 仅拼接已上传文件信息
-    if file_list:
-        names = ", ".join(os.path.basename(p) for p in file_list)
-        user_msg = (user_msg + "\n" if user_msg else "") + f"[已上传文件：{names}]"
-<<<<<<< HEAD
-    # 用户消息直接传递（前端不显示个人信息）
-    history.append({"role":"user","content":user_msg})
-=======
->>>>>>> origin/master
+    # rag 检索触发逻辑（只触发一次）
+    rag_info = None
+    msg = user_msg.replace("，", ",")
+    rag_main_kw = ["糖尿病"]
+    rag_sub_kw = ["风险", "概率", "可能", "会得", "患病", "几率", "chance", "risk", "possibility"]
+    trigger_rag = any(kw in msg for kw in rag_main_kw) and any(kw in msg for kw in rag_sub_kw)
+    if trigger_rag:
+        from rag.index_diabetes import generate_scientific_advice
+        if auto_features:
+            rag_info = generate_scientific_advice(auto_features)
+            print('auto_features:', auto_features)
+            print('rag_info:', rag_info if rag_info else '未触发rag')
+            if rag_info:
+                history.append({"role": "system", "content": "【数据集相似病例参考】\n" + rag_info})
 
-    # 拼接个人信息（后端传给模型，不显示在聊天区）
+    # 拼接个人信息
     personal_info = (
         f"姓名：{name or '未填写'}；年龄：{age or '未填写'}；体重：{weight or '未填写'}；"
         f"性别：{gender or '未填写'}；既往史：{past_history or '未填写'}"
@@ -447,26 +370,18 @@ def on_send(text, file_list, history, name, age, weight, gender, past_history):
             auto_info = m["content"]
             break
 
-    # LLM 建议
+    # 拼接 rag_info 展示（只取最新一次）
+    rag_info_str = ''
+    for m in reversed(history):
+        if m["role"] == "system" and m["content"].startswith("【数据集相似病例参考】"):
+            rag_info_str = m["content"] + "\n"
+            break
+
     if auto_info:
-<<<<<<< HEAD
-        # 从history中查找rag检索结果
-        rag_info = ''
-        for m in reversed(history):
-            if m["role"] == "system" and m["content"].startswith("【数据集相似病例参考】"):
-                rag_info = m["content"]
-                break
-        if rag_info:
-            rag_info = f"{rag_info}\n"
         prompt = (
             f"用户个人信息：{personal_info}\n"
             f"用户上传了医学报告或图片，系统自动识别出如下结构化信息：\n{auto_info}\n"
-            f"{rag_info}"
-=======
-        prompt = (
-            f"用户个人信息：{personal_info}\n"
-            f"用户上传了医学报告或图片，系统自动识别出如下结构化信息：\n{auto_info}\n,并恢复在auto_info中了解了什么"
->>>>>>> origin/master
+            f"{rag_info_str}"
             f"请基于这些医学信息，结合用户消息“{user_msg}”，并恢复在user_msg中了解了什么，不用解释了解的信息。"
             "如果信息不全可适当说明，但不要说无法识别图片。"
         )
@@ -476,30 +391,10 @@ def on_send(text, file_list, history, name, age, weight, gender, past_history):
             f"用户消息：{user_msg}\n并恢复在user_msg中了解了什么，不用解释了解的信息。"
         )
     logger.info("Prompt to LLM: %s", prompt)
-    # RAG 检索：调用智普知识库对话接口
-    kb_id = get_or_update_knowledge_id()
-    try:
-        kb_reply = kb_manager.chat_with_knowledge_base(
-            knowledge_id=kb_id,
-            question=user_msg,
-            stream=False
-        )
-    except Exception as e:
-        kb_reply = f"知识库检索出错：{e}"
-
-    # 构建 Prompt
-    prompt_parts = [f"用户个人信息：{personal_info}"]
-    if auto_info:
-        prompt_parts.append(f"系统自动识别信息：\n{auto_info}")
-    prompt_parts.append(f"知识库回复：\n{kb_reply}")
-    prompt_parts.append(f"用户消息：{user_msg}")
-    prompt_parts.append("请基于上述信息给出专业、准确的糖尿病管理建议。")
-    final_prompt = "\n".join(prompt_parts)
-    logger.info("Final RAG Prompt to LLM: %s", final_prompt)
 
     # 调用大模型生成最终回复
     try:
-        reply = llm._call(final_prompt)
+        reply = llm._call(prompt)
     except Exception as e:
         reply = f"模型调用出错：{e}"
     history.append({"role": "assistant", "content": reply})
@@ -512,15 +407,9 @@ def on_send(text, file_list, history, name, age, weight, gender, past_history):
         gr.update(choices=[], value=[]),
         gr.update(value="")
     )
-
-
 def on_generate_case(history, name=None, age=None, weight=None, gender=None, past_history=None):
     # 判断个人信息是否填写
-    info_filled = any([name, age, weight, gender, past_history])
-    # 判断是否有对话内容（排除初始欢迎语）
-    dialog_filled = history and any(
-        m["role"] == "user" and m["content"].strip() for m in history if m["role"] == "user"
-    )
+    history.append({"role":"user","content":user_msg})
 
     # 情况1：个人信息和对话都没有
     if not info_filled and not dialog_filled:
@@ -669,11 +558,7 @@ with gr.Blocks(css=css) as demo:
         inputs=[text_input, file_list, state, name_input, age_input, weight_input, gender_input, history_input],
         outputs=[chatbot, state, file_list, file_selector, text_input]
     )
-    text_input.submit(
-        fn=on_send,
-        inputs=[text_input, file_list, state, name_input, age_input, weight_input, gender_input, history_input],
-        outputs=[chatbot, state, file_list, file_selector, text_input]
-    )
+    # 移除 text_input.submit 的 on_send 绑定，避免重复触发
     # 清除对话历史按钮
     clear_btn.click(
         fn=on_clear_history,
