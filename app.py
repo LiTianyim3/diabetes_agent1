@@ -1,4 +1,4 @@
-import os
+import os,re
 import base64
 import logging
 import gradio as gr
@@ -32,6 +32,12 @@ KEY_MAP = {
 }
 
 INDICATORS = {
+    "年龄": {
+        "prompt":
+            "我已经看到了报告接下来我会问几个问题"
+            "您多大了",
+        "value": None
+    },
     "症状": {
         "prompt":
             "为了更好地了解您的情况，"
@@ -39,18 +45,18 @@ INDICATORS = {
             "如口渴、排尿增多或食量明显增加？",
         "value": None
     },
-    "空腹血糖": {
+    "空腹血糖(GLU0)": {
         "prompt":
             "清晨空腹时（未进食至少8小时），"
             "您的血糖大约是多少？"
             "请直接输入数值（mmol/L）。",
         "value": None
     },
-    "两小时血糖": {
+    "二小时血糖(GLU2)": {
         "prompt": "在进餐后两小时内测得的血糖值是多少？",
         "value": None
     },
-    "糖化血红蛋白": {
+    "糖化血红蛋白(HbA1c)": {
         "prompt": "最近一次糖化血红蛋白（HbA1c）检测结果是多少？",
         "value": None
     },
@@ -172,7 +178,7 @@ def get_latest_knowledge_id():
     latest_id = list(info.keys())[-1]
     return latest_id
 
-def on_file_upload(file_paths, history, file_list):
+def on_file_upload(file_paths,chat_history, history, file_list):
     history   = history   or []
     file_list = file_list or []
 
@@ -249,95 +255,190 @@ def on_send(text, file_list, history, name, age, weight, gender, past_history):
         user_msg = f"{user_msg}\n{suffix}" if user_msg else suffix
     history.append({"role":"user","content":user_msg})
 
-    
-    for key, info in INDICATORS.items():
-        prompt_text = info["prompt"]
-        value = info["value"]
-        # 打印调试信息可选
-        print(f"指标名：{key}，提示语：{prompt_text}，已填值：{value}")
-        if value is None:
-            # 把这个指标的 prompt 发给用户
-            history.append({
-                "role": "assistant",
-                "content": prompt_text
-            })
-            INDICATORS[key]["value"] = user_msg
-            return (
-                history,                                     
-                history,                                     
-                file_list,                                    
-                gr.update(choices=[os.path.basename(p) for p in file_list], value=[]), 
-                gr.update(value="")                          
-            )
+    missing = [key for key, info in INDICATORS.items() if info["value"] is None]
+    print(missing)
+    if missing :
+        for key, info in INDICATORS.items():
+            prompt_text = info["prompt"]
+            value = info["value"]
+            # 打印调试信息可选
+            print(f"指标名：{key}，提示语：{prompt_text}，已填值：{value}")
+            if value is None:
+                # 把这个指标的 prompt 发给用户
+                history.append({
+                    "role": "assistant",
+                    "content": prompt_text
+                })
+                INDICATORS[key]["value"] = user_msg
+                return (
+                    history,                                     
+                    history,                                     
+                    file_list,                                    
+                    gr.update(choices=[os.path.basename(p) for p in file_list], value=[]), 
+                    gr.update(value="")                          
+                )
 
-    # 仅拼接已上传文件信息
-    if file_list:
-        names = ", ".join(os.path.basename(p) for p in file_list)
-        user_msg = (user_msg + "\n" if user_msg else "") + f"[已上传文件：{names}]"
-
-    # 拼接个人信息（后端传给模型，不显示在聊天区）
-    personal_info = (
-        f"姓名：{name or '未填写'}；年龄：{age or '未填写'}；体重：{weight or '未填写'}；"
-        f"性别：{gender or '未填写'}；既往史：{past_history or '未填写'}"
+    msg_norm = user_msg.replace("，", ",")
+    trigger_rag = (
+        "糖尿病" in msg_norm
+        and any(kw in msg_norm for kw in ["风险","概率","可能","会得","患病","几率","chance","risk","possibility"])
     )
-
-    # 检查是否有图片/报告自动识别信息
-    auto_info = None
-    for m in reversed(history):
-        if m["role"] == "system" and m["content"].startswith("自动识别信息："):
-            auto_info = m["content"]
-            break
-
-    # LLM 建议
-    if auto_info:
-        prompt = (
-            f"用户个人信息：{personal_info}\n"
-            f"用户上传了医学报告或图片，系统自动识别出如下结构化信息：\n{auto_info}\n,并恢复在auto_info中了解了什么"
-            f"请基于这些医学信息，结合用户消息“{user_msg}”，并恢复在user_msg中了解了什么，不用解释了解的信息。"
-            "如果信息不全可适当说明，但不要说无法识别图片。"
+    print(trigger_rag)
+    if trigger_rag:
+        # 1.1 定义要抽取的指标正则
+        indicator_patterns = {
+            "年龄":           r"(?:年龄|age)[^\d]*(\d{1,3})",
+            "空腹血糖":       r"(?:空腹血糖|血糖值|血糖)[^\d]*(\d+(?:\.\d+)?)",
+            "两小时血糖":     r"(?:两小时血糖|2h血糖)[^\d]*(\d+(?:\.\d+)?)",
+            "糖化血红蛋白":   r"(?:糖化血红蛋白|HbA1c)[^\d]*(\d+(?:\.\d+)?)",
+            "BMI":           r"(?:BMI|bmi|体质指数)[^\d]*(\d+(?:\.\d+)?)",
+            "血压收缩压":     r"(?:收缩压|SBP)[^\d]*(\d+(?:\.\d+)?)",
+            "血压舒张压":     r"(?:舒张压|DBP)[^\d]*(\d+(?:\.\d+)?)",
+            "静息心率":       r"(?:心率|静息心率|HR)[^\d]*(\d+(?:\.\d+)?)",
+        }
+        # print(f"indicator_patterns"+{indicator_patterns})
+        # 1.2 抽取并填充 INDICATORS
+        for k, pat in indicator_patterns.items():
+            if INDICATORS.get(k, {}).get("value") in (None, ""):
+                m = re.search(pat, user_msg, re.IGNORECASE)
+                if m:
+                    INDICATORS[k]["value"] = m.group(1)
+        # 1.3 聚合数值特征
+        auto_features = {}
+        for k, info in INDICATORS.items():
+            try:
+                auto_features[k] = float(info["value"])
+            except:
+                pass
+        # 1.4 调用相似病例检索
+        if auto_features:
+            from rag.index_diabetes import generate_scientific_advice
+            rag_info = generate_scientific_advice(auto_features)
+            print('auto_features:', auto_features)
+            print('rag_info:', rag_info if rag_info else '未触发rag')
+            if rag_info:
+                history.append({
+                    "role": "system",
+                    "content": "【数据集相似病例参考】\n" + rag_info
+                })
+        # 1.5 构建并调用 RAG Prompt
+        personal = f"姓名：{name or '未填写'}；年龄：{age or '未填写'}；体重：{weight or '未填写'}；性别：{gender or '未填写'}；既往史：{past_history or '未填写'}"
+        prompt_parts = [f"用户个人信息：{personal}"]
+        # 可选：自动识别的报告信息
+        for m in reversed(history):
+            if m["role"]=="system" and m["content"].startswith("自动识别信息："):
+                prompt_parts.append(m["content"])
+                break
+        # 加入相似病例参考
+        for m in reversed(history):
+            if m["role"]=="system" and m["content"].startswith("【数据集相似病例参考】"):
+                prompt_parts.append(m["content"])
+                break     
+        
+        final_prompt = (
+            "请阅读以下 5 个典型相似病例及其关键特征：\n"
+            "相似病例1：gender:Female, age:0.56, hypertension:0, heart_disease:0, bmi:11.08, "
+            "HbA1c_level:3.5, blood_glucose_level:140, diabetes:0\n"
+            "相似病例2：gender:Male,   age:0.72, hypertension:0, heart_disease:0, bmi:11.98, "
+            "HbA1c_level:5.8, blood_glucose_level:140, diabetes:0\n"
+            "相似病例3：gender:Female, age:0.08, hypertension:0, heart_disease:0, bmi:12.74, "
+            "HbA1c_level:3.5, blood_glucose_level:140, diabetes:0\n"
+            "相似病例4：gender:Female, age:0.56, hypertension:0, heart_disease:0, bmi:12.10, "
+            "HbA1c_level:6.0, blood_glucose_level:140, diabetes:0\n"
+            "相似病例5：gender:Female, age:0.56, hypertension:0, heart_disease:0, bmi:12.33, "
+            "HbA1c_level:5.7, blood_glucose_level:140, diabetes:0\n\n"
+            "风险分级规则：\n"
+            "  • 0–1 例：低风险\n"
+            "  • 2–3 例：中风险\n"
+            "  • 4–5 例：高风险\n\n"
+            f"当前用户特征：{auto_features}\n\n"
+            "请以专业且通俗易懂的语言评估该用户的糖尿病患病风险等级（低/中/高），"
+            "并简要说明您的对这些指标数据的分析及相应的健康管理建议。"
+            "请勿在回复中重复上述分级规则名称或字段标签，也无需展示原始特征数据。"
         )
-    else:
-        prompt = (
-            f"用户个人信息：{personal_info}\n"
-            f"用户消息：{user_msg}\n并恢复在user_msg中了解了什么，不用解释了解的信息。"
-        )
-    logger.info("Prompt to LLM: %s", prompt)
-    # RAG 检索：调用智普知识库对话接口
-    kb_id = get_or_update_knowledge_id()
-    try:
-        kb_reply = kb_manager.chat_with_knowledge_base(
-            knowledge_id=kb_id,
-            question=user_msg,
-            stream=False
-        )
-    except Exception as e:
-        kb_reply = f"知识库检索出错：{e}"
 
-    # 构建 Prompt
-    prompt_parts = [f"用户个人信息：{personal_info}"]
-    if auto_info:
-        prompt_parts.append(f"系统自动识别信息：\n{auto_info}")
-    prompt_parts.append(f"知识库回复：\n{kb_reply}")
-    prompt_parts.append(f"用户消息：{user_msg}")
-    prompt_parts.append("请基于上述信息给出专业、准确的糖尿病管理建议。")
-    final_prompt = "\n".join(prompt_parts)
-    logger.info("Final RAG Prompt to LLM: %s", final_prompt)
-
-    # 调用大模型生成最终回复
-    try:
         reply = llm._call(final_prompt)
-    except Exception as e:
-        reply = f"模型调用出错：{e}"
-    history.append({"role": "assistant", "content": reply})
+        history.append({"role": "assistant", "content": reply})
 
-    # 清空上传列表
-    return (
-        history,
-        history,
-        [],
-        gr.update(choices=[], value=[]),
-        gr.update(value="")
-    )
+        return history, history, [], gr.update(choices=[], value=[]), gr.update(value="")
+
+    #第二种阶段
+    else:
+
+        # 仅拼接已上传文件信息
+        if file_list:
+            names = ", ".join(os.path.basename(p) for p in file_list)
+            user_msg = (user_msg + "\n" if user_msg else "") + f"[已上传文件：{names}]"
+
+        # 拼接个人信息（后端传给模型，不显示在聊天区）
+        personal_info = (
+            f"姓名：{name or '未填写'}；年龄：{age or '未填写'}；体重：{weight or '未填写'}；"
+            f"性别：{gender or '未填写'}；既往史：{past_history or '未填写'}"
+        )
+
+        # 检查是否有图片/报告自动识别信息
+        auto_info = None
+        for m in reversed(history):
+            if m["role"] == "system" and m["content"].startswith("自动识别信息："):
+                auto_info = m["content"]
+                break
+
+        # LLM 建议
+        if auto_info:
+            prompt = (
+                "请使用中文回复。\n"
+                f"用户基本信息：{personal_info}\n"
+                f"系统自动识别的医学报告/图片信息：\n{auto_info}\n"
+                f"用户描述：{user_msg}\n\n"
+                "请基于以上信息：\n"
+                "对用户输入的内容，及所关心的问题，提出关于糖尿病的专业分析、建议"
+                "如有缺失关键信息，可简要提醒用户补充，但无需说明无法识别图片。"
+            )
+        else:
+            prompt = (
+                f"必须使用中文回答"
+                f"用户个人信息：{personal_info}\n"
+                f"用户消息：{user_msg}\n"
+                "请基于以上信息：\n"
+                "对用户输入的内容，及所关心的问题，提出关于糖尿病的专业分析、建议"
+            )
+        logger.info("Prompt to LLM: %s", prompt)
+        # RAG 检索：调用智普知识库对话接口
+        kb_id = get_or_update_knowledge_id()
+        try:
+            kb_reply = kb_manager.chat_with_knowledge_base(
+                knowledge_id=kb_id,
+                question=user_msg,
+                stream=False
+            )
+        except Exception as e:
+            kb_reply = f"知识库检索出错：{e}"
+
+        # 构建 Prompt
+        prompt_parts = [f"用户个人信息：{personal_info}"]
+        if auto_info:
+            prompt_parts.append(f"系统自动识别信息：\n{auto_info}")
+        prompt_parts.append(f"知识库回复：\n{kb_reply}")
+        prompt_parts.append(f"用户消息：{user_msg}")
+        prompt_parts.append("请基于上述信息给出专业、准确的糖尿病管理建议。必须使用中文回答")
+        final_prompt = "\n".join(prompt_parts)
+        logger.info("Final RAG Prompt to LLM: %s", final_prompt)
+
+        # 调用大模型生成最终回复
+        try:
+            reply = llm._call(final_prompt)
+        except Exception as e:
+            reply = f"模型调用出错：{e}"
+        history.append({"role": "assistant", "content": reply})
+
+        # 清空上传列表
+        return (
+            history,
+            history,
+            [],
+            gr.update(choices=[], value=[]),
+            gr.update(value="")
+        )
 
 
 def on_generate_case(history, name=None, age=None, weight=None, gender=None, past_history=None):
@@ -373,6 +474,7 @@ def on_generate_case(history, name=None, age=None, weight=None, gender=None, pas
             f"请根据以下对话生成结构化糖尿病病例：\n\n"
             f"{personal_info}\n\n{hist}\n\n"
             "病例应包括：用户个人信息(姓名，年龄，体重，性别)、主诉、现病史、既往史、检查结果、初步诊断、管理建议。控制字数在500字之内"
+            "注意初步诊断应该写为之前对话历史所认为的患病风险"
         )
         logger.info("Case prompt to LLM: %s", case_p)
         try:
@@ -417,13 +519,13 @@ with gr.Blocks(css=css) as demo:
         history_input = gr.Textbox(label="既往史", placeholder="请输入既往史", lines=1)
 
     # 初始引导消息
-    initial_message = {
+    initial_messages = [{
         "role": "assistant",
         "content": (
             "您好，我是您的智能糖尿病健康管理助手，可以为您提供糖尿病相关的检测解读、健康建议和个性化管理方案。\n"
-            "请问您的姓名、年龄、性别、糖尿病类型、诊断时间等基本信息，以及目前的主要健康关注点是什么？"
+            "请问您最近有做过什么医学报告吗，我会先对您做一个简单的问询"
         )
-    }
+    }]
 
     with gr.Row():
         # 左侧对话区域
@@ -475,12 +577,12 @@ with gr.Blocks(css=css) as demo:
             case_md = gr.Markdown("**病例记录**\n\n尚无内容")
             gen_case_btn = gr.Button("生成病例报告单", elem_id="gen-case-btn")
 
-    state = gr.State([{"role": "assistant", "content": "您好，我是糖尿病专业助手，请您提供详细病例信息，以便我为您量身定制医学建议。"}])
+    state = gr.State(initial_messages)
 
     # 上传 -> 更新聊天 & 文件列表
     upload_btn.upload(
         fn=on_file_upload,
-        inputs=[upload_btn, state, file_list],
+        inputs=[upload_btn,chatbot, state, file_list],
         outputs=[chatbot, state, file_list, file_selector]
     )
     # 勾选即删除
@@ -512,6 +614,10 @@ with gr.Blocks(css=css) as demo:
         inputs=[state, name_input, age_input, weight_input, gender_input, history_input],
         outputs=[case_md]
     )
-
+    demo.load(
+        fn=lambda: (initial_messages, initial_messages),
+        inputs=None,
+        outputs=[chatbot, state]
+    )
 if __name__ == "__main__":
     demo.launch(inbrowser=True)
