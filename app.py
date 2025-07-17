@@ -132,6 +132,12 @@ css = """
   max-width: 60px;
 }
 """
+def image_to_base64(image_path):
+    """将图片文件转换为base64编码字符串"""
+    with open(image_path, "rb") as image_file:
+        encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
+        return encoded_string
+
 # 新增：知识库增量/复用机制
 config = Config.get_instance()
 kb_manager = get_zhipu_knowledge_manager()
@@ -204,8 +210,13 @@ def on_file_upload(file_paths,chat_history, history, file_list):
 
         # 聊天区插入图片/文件
         if ext in ("png","jpg","jpeg"):
-            md = f"![{name}](data:image/{ext};base64,{b64})"
-            history.append({"role":"system", "content":f"已上传图片：{name}\n\n{md}"})
+            # 构建图片显示HTML
+            image_html = f"""
+                <div>
+                    <img src="data:image/{ext};base64,{b64}" alt="{name}" style="max-width: 100%; height: auto; cursor: pointer; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);" />
+                </div>
+            """
+            history.append({"role":"system", "content":f"已上传图片：{name}\n\n{image_html}"})
             # 自动解析图片医学指标
             result = parse_lab_report(file_bytes)
             print(result)
@@ -248,13 +259,62 @@ def on_delete(selected, file_list):
 def on_send(text, file_list, history, name, age, weight, gender, past_history):
     history   = history or []
     user_msg  = text or ""
+    # ======================== 新增：文件显示与 LLM 消息分离 ========================
+    # display_msg -> 发到聊天窗口（含图片HTML预览）
+    # prompt_msg  -> 发给 LLM（只带文件名，不带base64）
+    display_msg = user_msg
+    prompt_msg  = user_msg
+
 
     if file_list:
-        names = ", ".join(os.path.basename(p) for p in file_list)
-        suffix = f"[已上传文件：{names}]"
-        user_msg = f"{user_msg}\n{suffix}" if user_msg else suffix
-    history.append({"role":"user","content":user_msg})
+        file_display_parts = []  # HTML片段列表（用于显示）
+        file_names = []          # 文件名列表（发给LLM）
 
+        for file_path in file_list:
+            file_name = os.path.basename(file_path)
+            ext = os.path.splitext(file_name)[1].lower().lstrip(".")
+            file_names.append(file_name)
+
+            if ext in ("png", "jpg", "jpeg"):
+                try:
+                    with open(file_path, "rb") as f:
+                        file_bytes = f.read()
+                    b64 = base64.b64encode(file_bytes).decode("utf-8")
+                    # 注意：gr.Chatbot 支持 Markdown；我们插 HTML <img>，Gradio 会原样渲染（或降级为文本）
+                    # 如遇安全策略可改为 Markdown ![](...) 内嵌 data URI。
+                    image_html = (
+                        f'<div style="margin:10px 0;">'
+                        f'<img src="data:image/{ext};base64,{b64}" alt="{file_name}" '
+                        f'style="max-width:100%;height:auto;cursor:pointer;border-radius:8px;'
+                        f'box-shadow:0 2px 8px rgba(0,0,0,0.1);" />'
+                        f'</div>'
+                    )
+                    file_display_parts.append(image_html)
+                except Exception as e:
+                    file_display_parts.append(f"<p>图片加载失败：{file_name} - {e}</p>")
+            else:
+                file_display_parts.append(f"<p>已上传文件：{file_name}</p>")
+
+        # 把所有图片/文件 HTML 插到显示消息中
+        if file_display_parts:
+            file_content = "\n".join(file_display_parts)
+            if display_msg:
+                display_msg = f"{display_msg}\n\n{file_content}"
+            else:
+                display_msg = file_content
+
+        # 给 LLM 的提示：只带文件名列表，避免巨型 base64
+        if file_names:
+            file_names_str = ", ".join(file_names)
+            suffix = f"[已上传文件：{file_names_str}]"
+            prompt_msg = f"{prompt_msg}\n{suffix}" if prompt_msg else suffix
+
+    # 把显示用消息写入历史（用户看到的）
+    history.append({"role": "user", "content": display_msg})
+
+    # 后续逻辑一律使用精简版（不含base64）的 user_msg
+    user_msg = prompt_msg
+    
     missing = [key for key, info in INDICATORS.items() if info["value"] is None]
     print(missing)
     if missing :
