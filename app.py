@@ -127,6 +127,12 @@ css = """
 }
 """
 
+def image_to_base64(image_path):
+    """将图片文件转换为base64编码字符串"""
+    with open(image_path, "rb") as image_file:
+        encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
+        return encoded_string
+
 def on_file_upload(file_paths, history, file_list):
     history   = history   or []
     file_list = file_list or []
@@ -153,8 +159,13 @@ def on_file_upload(file_paths, history, file_list):
 
         # 聊天区插入图片/文件
         if ext in ("png","jpg","jpeg"):
-            md = f"![{name}](data:image/{ext};base64,{b64})"
-            history.append({"role":"system", "content":f"已上传图片：{name}\n\n{md}"})
+            # 构建图片显示HTML
+            image_html = f"""
+                <div>
+                    <img src="data:image/{ext};base64,{b64}" alt="{name}" style="max-width: 100%; height: auto; cursor: pointer; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);" />
+                </div>
+            """
+            history.append({"role":"system", "content":f"已上传图片：{name}\n\n{image_html}"})
             # 自动解析图片医学指标
             result = parse_lab_report(file_bytes)
             print(result)
@@ -232,11 +243,58 @@ def on_send(text, file_list, history, name, age, weight, gender, past_history):
     history   = history or []
     user_msg  = text or ""
 
+    # 处理上传的文件显示（仅用于前端显示）
+    display_msg = user_msg  # 用于显示的消息
+    prompt_msg = user_msg   # 用于发送给LLM的消息
+    
     if file_list:
-        names = ", ".join(os.path.basename(p) for p in file_list)
-        suffix = f"[已上传文件：{names}]"
-        user_msg = f"{user_msg}\n{suffix}" if user_msg else suffix
-    history.append({"role":"user","content":user_msg})
+        # 构建显示用的图片HTML
+        file_display_parts = []
+        # 构建prompt用的简单文件列表
+        file_names = []
+        
+        for file_path in file_list:
+            file_name = os.path.basename(file_path)
+            ext = os.path.splitext(file_name)[1].lower().lstrip(".")
+            file_names.append(file_name)
+            
+            # 如果是图片文件，生成显示HTML
+            if ext in ("png", "jpg", "jpeg"):
+                try:
+                    with open(file_path, "rb") as f:
+                        file_bytes = f.read()
+                        b64 = base64.b64encode(file_bytes).decode("utf-8")
+                    
+                    image_html = f"""
+                        <div style="margin: 10px 0;">
+                            <img src="data:image/{ext};base64,{b64}" alt="{file_name}" style="max-width: 100%; height: auto; cursor: pointer; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);" />
+                        </div>
+                    """
+                    file_display_parts.append(image_html)
+                except Exception as e:
+                    file_display_parts.append(f"<p>图片加载失败：{file_name} - {str(e)}</p>")
+            else:
+                file_display_parts.append(f"<p>已上传文件：{file_name}</p>")
+        
+        # 组合显示消息（包含图片HTML）
+        if file_display_parts:
+            file_content = "\n".join(file_display_parts)
+            if display_msg:
+                display_msg = f"{display_msg}\n\n{file_content}"
+            else:
+                display_msg = file_content
+        
+        # 组合prompt消息（只包含文件名）
+        if file_names:
+            file_names_str = ", ".join(file_names)
+            suffix = f"[已上传文件：{file_names_str}]"
+            prompt_msg = f"{prompt_msg}\n{suffix}" if prompt_msg else suffix
+    
+    # 添加显示消息到历史记录（用户看到的）
+    history.append({"role":"user","content":display_msg})
+    
+    # 但是后续处理使用prompt_msg（不包含base64图片数据）
+    user_msg = prompt_msg
 
     
     # 优先判断是否有自动识别的数值型指标
@@ -271,13 +329,7 @@ def on_send(text, file_list, history, name, age, weight, gender, past_history):
                     gr.update(value="")                         
                 )
 
-    # 仅拼接已上传文件信息
-    if file_list:
-        names = ", ".join(os.path.basename(p) for p in file_list)
-        user_msg = (user_msg + "\n" if user_msg else "") + f"[已上传文件：{names}]"
-    # 用户消息直接传递（前端不显示个人信息）
-    history.append({"role":"user","content":user_msg})
-
+    # 文件信息已在前面处理，这里直接继续
     # 拼接个人信息（后端传给模型，不显示在聊天区）
     personal_info = (
         f"姓名：{name or '未填写'}；年龄：{age or '未填写'}；体重：{weight or '未填写'}；"
@@ -305,7 +357,7 @@ def on_send(text, file_list, history, name, age, weight, gender, past_history):
             f"用户个人信息：{personal_info}\n"
             f"用户上传了医学报告或图片，系统自动识别出如下结构化信息：\n{auto_info}\n"
             f"{rag_info}"
-            f"请基于这些医学信息，结合用户消息“{user_msg}”，并恢复在user_msg中了解了什么，不用解释了解的信息。"
+            f"请基于这些医学信息，结合用户消息“{user_msg}”，并恢复在“{user_msg}”中了解了什么，不用解释了解的信息。"
             "如果信息不全可适当说明，但不要说无法识别图片。"
         )
     else:
