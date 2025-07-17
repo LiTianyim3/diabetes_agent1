@@ -117,7 +117,7 @@ def build_ui(
 
     with gr.Blocks(css=css) as demo:
         gr.Markdown(
-            "<div id='main-title'>糖尿病助手 🩸 <span style='font-size:1.5rem;font-weight:normal;color:#222;'>— 左：对话交互     — 右：病例记录</span></div>"
+            "<div id='main-title'>糖尿病助手 🩸 <span style='font-size:1.5rem;font-weight:normal;color:#222;'>— 左：对话交互  — 右：病例记录</span></div>"
         )
 
         with gr.Row(elem_id="personal-info-row"):
