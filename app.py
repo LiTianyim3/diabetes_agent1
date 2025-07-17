@@ -509,6 +509,9 @@ def on_generate_case(history, name=None, age=None, weight=None, gender=None, pas
         m["role"] == "user" and m["content"].strip() for m in history if m["role"] == "user"
     )
 
+    # 新增导入
+    from tools.case_json_manager import save_case_json
+
     # 情况1：个人信息和对话都没有
     if not info_filled and not dialog_filled:
         return "没有信息可以生成病例报告单，请先填写个人信息或进行对话。"
@@ -522,7 +525,18 @@ def on_generate_case(history, name=None, age=None, weight=None, gender=None, pas
             f"性别：{gender or '未填写'}\n"
             f"既往史：{past_history or '未填写'}"
         )
-        return f"**病例报告单**\n\n{personal_info}"
+        case_text = f"**病例报告单**\n\n{personal_info}"
+        # 新增：保存json
+        case_dict = {
+            "姓名": name or "",
+            "年龄": age or "",
+            "体重": weight or "",
+            "性别": gender or "",
+            "既往史": past_history or "",
+            "病例内容": case_text
+        }
+        save_case_json(case_dict, name)
+        return case_text
 
     # 情况3：只有对话内容
     if not info_filled and dialog_filled:
@@ -542,6 +556,16 @@ def on_generate_case(history, name=None, age=None, weight=None, gender=None, pas
         except Exception as e:
             case = f"生成病例出错：{e}"
             return case
+        # 新增：保存json
+        case_dict = {
+            "姓名": "",
+            "年龄": "",
+            "体重": "",
+            "性别": "",
+            "既往史": "",
+            "病例内容": case
+        }
+        save_case_json(case_dict)
         return case
 
     # 情况4：个人信息和对话都有
@@ -561,123 +585,32 @@ def on_generate_case(history, name=None, age=None, weight=None, gender=None, pas
     except Exception as e:
         case = f"生成病例出错：{e}"
         return case
+    # 新增：保存json
+    case_dict = {
+        # "姓名": name or "",
+        # "年龄": age or "",
+        # "体重": weight or "",
+        # "性别": gender or "",
+        # "既往史": past_history or "",
+        "病例内容": case
+    }
+    save_case_json(case_dict, name)
     return case
 
 def on_clear_history():
     welcome_msg = [{"role": "assistant", "content": "您好，我是糖尿病专业助手，请您提供详细病例信息，以便我为您量身定制医学建议。你有关于最近的报告可以给我看看吗"}]
     return welcome_msg, welcome_msg, "**病例记录**\n\n尚无内容"
 
-with gr.Blocks(css=css) as demo:
-    gr.Markdown("## 糖尿病助手 🩸 — 左：对话交互；右：病例记录")
+# 新增：导入自定义UI
+from ui.custom_ui import build_ui
 
-    # 新增：个人信息输入框
-    with gr.Row():
-        name_input = gr.Textbox(label="姓名", placeholder="请输入姓名", lines=1)
-        age_input = gr.Textbox(label="年龄", placeholder="请输入年龄", lines=1)
-        weight_input = gr.Textbox(label="体重（kg）", placeholder="请输入体重", lines=1)
-        gender_input = gr.Dropdown(label="性别", choices=["男", "女"], value=None)
-        history_input = gr.Textbox(label="既往史", placeholder="请输入既往史", lines=1)
+demo = build_ui(
+    on_file_upload,
+    on_delete,
+    on_send,
+    on_clear_history,
+    on_generate_case
+)
 
-    # 初始引导消息
-    initial_messages = [{
-        "role": "assistant",
-        "content": (
-            "您好，我是您的智能糖尿病健康管理助手，可以为您提供糖尿病相关的检测解读、健康建议和个性化管理方案。\n"
-            "请问您最近有做过什么医学报告吗，我会先对您做一个简单的问询"
-        )
-    }]
-
-    with gr.Row():
-        # 左侧对话区域
-        with gr.Column(scale=3):
-            chatbot = gr.Chatbot(type="messages", label="对话记录", height=500)
-            with gr.Row():
-                upload_btn = gr.UploadButton(
-                    "📎 上传文件",
-                    file_types=[".png",".jpg",".jpeg",".pdf"],
-                    file_count="multiple",
-                    type="filepath",
-                    elem_id="upload-btn",
-                    scale=1
-                )
-                text_input = gr.Textbox(
-                    placeholder="请输入问题或备注（可选）",
-                    lines=1,
-                    show_label=False,
-                    elem_id="text-input",
-                    scale=2
-                )
-                send_btn = gr.Button("发送", elem_id="send-btn", scale=1)
-            file_list = gr.State([])  # 用于存储文件路径
-            file_selector = gr.CheckboxGroup(
-                choices=[],
-                label="已上传文件（点击 × 删除）",
-                elem_id="file-selector"
-            )
-            with gr.Row():
-                gr.Examples(
-                    examples=[
-                        "糖尿病如何控制血糖？",
-                        "胰岛素使用注意事项？",
-                        "低血糖处理方式",
-                        "我最近血糖有点高，怎么缓解？",
-                        "糖尿病饮食有哪些禁忌？",
-                        "运动对血糖影响",
-                        "如何监测血糖变化？",
-                        "糖尿病并发症有哪些？",
-                        "胰岛素泵的适用性",
-                        "血糖高有哪些症状？",
-                    ],
-                    inputs=[text_input]
-                )
-                clear_btn = gr.Button("清除对话历史", elem_id="clear-btn", scale=1)
-
-        # 右侧病例记录
-        with gr.Column(scale=2):
-            case_md = gr.Markdown("**病例记录**\n\n尚无内容")
-            gen_case_btn = gr.Button("生成病例报告单", elem_id="gen-case-btn")
-
-    state = gr.State(initial_messages)
-
-    # 上传 -> 更新聊天 & 文件列表
-    upload_btn.upload(
-        fn=on_file_upload,
-        inputs=[upload_btn,chatbot, state, file_list],
-        outputs=[chatbot, state, file_list, file_selector]
-    )
-    # 勾选即删除
-    file_selector.change(
-        fn=on_delete,
-        inputs=[file_selector, file_list],
-        outputs=[file_list, file_selector]
-    )
-    # 发送 -> 生成回复，并清空文件列表和输入框
-    send_btn.click(
-        fn=on_send,
-        inputs=[text_input, file_list, state, name_input, age_input, weight_input, gender_input, history_input],
-        outputs=[chatbot, state, file_list, file_selector, text_input]
-    )
-    text_input.submit(
-        fn=on_send,
-        inputs=[text_input, file_list, state, name_input, age_input, weight_input, gender_input, history_input],
-        outputs=[chatbot, state, file_list, file_selector, text_input]
-    )
-    # 清除对话历史按钮
-    clear_btn.click(
-        fn=on_clear_history,
-        inputs=None,
-        outputs=[chatbot, state, case_md]
-    )
-    # 生成病例报告单按钮
-    gen_case_btn.click(
-        fn=on_generate_case,
-        inputs=[state, name_input, age_input, weight_input, gender_input, history_input],
-        outputs=[case_md]
-    )
-    demo.load(
-        fn=lambda: (initial_messages, initial_messages),
-        inputs=None,
-        outputs=[chatbot, state]
-    )
 if __name__ == "__main__":
     demo.launch(inbrowser=True)
