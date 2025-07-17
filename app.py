@@ -4,12 +4,88 @@ import logging
 import gradio as gr
 from client.zhipu_llm import ZhipuLLM
 import datetime
-from neo4j import GraphDatabase
+from rag.zhipu_knowledge_manager import get_zhipu_knowledge_manager
+from config.config import Config
+import json
 
-neo_driver = GraphDatabase.driver(
-    "bolt://localhost:7687",
-    auth=("neo4j", "415zc415")
-)
+KEY_MAP = {
+    "空腹血糖":       "空腹血糖(GLUO)",
+    "半小时血糖":     "半小时血糖(GLU0.5)",   # 如果解析器输出“半小时血糖”想填到“二小时血糖(GLU2)”里，请按需调整
+    "一小时血糖":     "一小时血糖(GLU1)",
+    "两小时血糖":     "两小时血糖(GLU2)",
+    "三小时血糖":     "三小时血糖(GLU3)",
+    "糖化血红蛋白":   "糖化血红蛋白(HbA1C)",
+    "空腹血糖(GLUO)": "空腹血糖",
+    "半小时血糖(GLUO0.5)":     "半小时血糖",   # 如果解析器输出“半小时血糖”想填到“二小时血糖(GLU2)”里，请按需调整
+    "一小时血糖(GLU1)":     "一小时血糖",
+    "两小时血糖(GLU2)":     "两小时血糖",
+    "三小时血糖(GLU3)":     "三小时血糖",
+    "糖化血红蛋白(HbA1C)":   "糖化血红蛋白",
+    "BMI":           "BMI",
+    "身高":           None,  # 不需要提示时可设为 None
+    "体重":           None,
+    "收缩压":         "血压收缩压",
+    "舒张压":         "血压舒张压",
+    "心率":           "静息心率",
+    "体温":           "体温",
+    # ……如有其它字段，按实际补充
+}
+
+INDICATORS = {
+    "症状": {
+        "prompt":
+            "为了更好地了解您的情况，"
+            "请您回想最近是否出现以下症状——"
+            "如口渴、排尿增多或食量明显增加？",
+        "value": None
+    },
+    "空腹血糖": {
+        "prompt":
+            "清晨空腹时（未进食至少8小时），"
+            "您的血糖大约是多少？"
+            "请直接输入数值（mmol/L）。",
+        "value": None
+    },
+    "两小时血糖": {
+        "prompt": "在进餐后两小时内测得的血糖值是多少？",
+        "value": None
+    },
+    "糖化血红蛋白": {
+        "prompt": "最近一次糖化血红蛋白（HbA1c）检测结果是多少？",
+        "value": None
+    },
+    "BMI": {
+        "prompt":
+            "BMI（体质指数）用于评估体重是否在健康范围，"
+            "与糖尿病风险密切相关。"
+            "请您告诉我您的 BMI 值（kg/m²，仅数字），",
+        "value": None
+    },
+    "血压收缩压": {
+        "prompt": "请提供收缩压 SBP（mmHg，仅数字）",
+        "value": None
+    },
+    "血压舒张压": {
+        "prompt": "请提供舒张压 DBP（mmHg，仅数字）",
+        "value": None
+    },
+    "静息心率": {
+        "prompt": "请提供静息心率 HR（次/分，仅数字）",
+        "value": None
+    },
+    "亲属糖尿病病史": {
+        "prompt": "您是否有一级亲属糖尿病病史或者家族史？",
+        "value": None
+    },
+    "其他重要说明": {
+        "prompt":
+            "如果您有正在使用的药物、特殊饮食或运动习惯等，"
+            "这会帮助我们更全面地了解您的健康状况。"
+            "请您补充其他重要说明：",
+        "value": None
+    }
+}
+
 
 
 KEY_MAP = {
@@ -130,118 +206,51 @@ css = """
   max-width: 60px;
 }
 """
+# 新增：知识库增量/复用机制
+config = Config.get_instance()
+kb_manager = get_zhipu_knowledge_manager()
+knowledge_base_path = config.get_with_nested_params("Knowledge-base-path")
 
-QUESTIONS = [
-    "1/4 您是否有多尿、多饮、多食等高血糖症状？（有 / 无）",
-    "2/4 您的空腹血糖（FPG）是多少？（mmol/L）",
-    "3/4 您的餐后 2 小时血糖是多少？（mmol/L）",
-    "4/4 您的 HbA1c（糖化血红蛋白）是多少？（%）",
-]
+# 获取或更新知识库ID（如有新文件则新建，否则复用）
+def get_or_update_knowledge_id():
+    # 先查找本地已存在知识库
+    knowledge_list = kb_manager.get_knowledge_base_list()
+    knowledge_id = None
+    if knowledge_list:
+        # 默认用第一个知识库
+        knowledge_id = knowledge_list[0]["id"]
+    # 检查是否有新文件需要上传
+    upload_results = {}
+    if knowledge_id:
+        upload_results = kb_manager.upload_directory_to_knowledge_base(
+            knowledge_id, knowledge_base_path
+        )
+        # 如果有新文件上传失败，或全部已存在，则直接用旧ID
+        if any(upload_results.values()):
+            return knowledge_id
+    # 如果没有知识库或全部上传失败，则新建
+    if not knowledge_id or not any(upload_results.values()):
+        knowledge_id = kb_manager.create_knowledge_base(
+            name="糖尿病智能问答知识库",
+            description="包含糖尿病相关知识、意图检测等内容的综合知识库"
+        )
+        kb_manager.upload_directory_to_knowledge_base(
+            knowledge_id, knowledge_base_path
+        )
+    return knowledge_id
 
-def _query_graph(answers: dict):
-    """
-    answers = {"sym": "有/无", "fpg": "7.8", "pp2h": "12.0", "hb": "6.8"}
-    返回去重后的诊断名称列表（可能为空）
-    """
-    cypher = """
-    WITH $sym AS sym,
-         toFloat($fpg)  AS fpg,
-         toFloat($pp2h) AS pp2h,
-         toFloat($hb)   AS hb
-    OPTIONAL MATCH (s:Symptom {name:'典型高血糖症状'})-[:LEADS_TO]->(d1:Diagnosis)
-      WHERE sym = '有'
-    OPTIONAL MATCH (i1:Indicator {name:'FPG'})-[:LEADS_TO]->(d2:Diagnosis)
-      WHERE fpg >= i1.threshold
-    OPTIONAL MATCH (i2:Indicator {name:'PostPrandial2H'})-[:LEADS_TO]->(d3:Diagnosis)
-      WHERE pp2h >= i2.threshold
-    OPTIONAL MATCH (i3:Indicator {name:'HbA1c'})-[:LEADS_TO]->(d4:Diagnosis)
-      WHERE hb >= i3.threshold
-    RETURN
-      collect(d1.name) + collect(d2.name) +
-      collect(d3.name) + collect(d4.name) AS all_names
-    """
-    with neo_driver.session(bookmarks=None) as s:
-        rec = s.run(cypher, **answers).single()
-        raw = rec["all_names"] if rec else []
-        # 过滤 None / 空串，再去重
-        return list({n for n in raw if n})
-
-def gen_followup_question(answers: dict, asked: list[str]) -> str:
-    """
-    answers : 已收集的回答 dict
-    asked   : 已经问过的问题文本列表
-    """
-    prompt = (
-        "你是一名内分泌科医生，正在做糖尿病问诊。\n"
-        "以下问题已经问过，禁止重复：\n" +
-        "\n".join(f"- {q}" for q in asked) + "\n\n"
-        "已获回答：\n"
-        f"典型症状={answers.get(0,'未回答')}；"
-        f"FPG={answers.get(1,'未回答')}；"
-        f"餐后2h={answers.get(2,'未回答')}；"
-        f"HbA1c={answers.get(3,'未回答')}\n"
-        "请提出下一条最关键且不重复的问题，"
-        "要求：用中文、简洁，且只输出问题本身。"
-    )
-    try:
-        q = llm._call(prompt).strip()
-    except Exception:
-        q = ""
-    return q or "请提供其他与血糖相关的检查或症状信息？"
-
-def guided_on_send(text, file_list, history_state,
-                   name, age, weight, gender, past_history):
-    history, step, answers = history_state
-    user_text = (text or "").strip()
-
-    # 收集上一步回答
-    if step > 0:
-        answers[step-1] = user_text
-        history.append({"role":"user","content":user_text})
-
-    # 还没问完 ⇒ 继续提问
-    if step < len(QUESTIONS):
-        q = QUESTIONS[step]
-        history.append({"role":"assistant","content":q})
-        step += 1
-        return history, (history, step, answers), file_list, gr.update(), gr.update(value="")
-
-    diag_list = _query_graph({
-        "sym":  answers.get(0, "无"),
-        "fpg":  answers.get(1, "0"),
-        "pp2h": answers.get(2, "0"),
-        "hb":   answers.get(3, "0")
-    })
-    MAX_EXTRA_QUESTIONS = 5   # 最多继续追问 5 次
-    MAX_RETRY = 3          # 生成不重复问题最多重试 3 次
-    
-    if diag_list:
-        reply = "初步可能诊断类型：" + "、".join(diag_list)
-        history.append({"role":"assistant","content":reply})
-        # 结束：重置 state
-        new_state = ([{"role":"assistant","content":"如需再次问诊，请输入任意内容。"}], 0, {})
-        return history, new_state, [], gr.update(), gr.update(value="")
-
-    # ── 若仍未诊断，自动生成下一条问题 ──
-    if step - 4 >= MAX_EXTRA_QUESTIONS:
-        reply = "已追问多次仍无法给出诊断，建议携带完整检查报告就医。"
-        history.append({"role":"assistant","content":reply})
-        new_state = ([{"role":"assistant","content":"如需再次问诊，请输入任意内容。"}], 0, {})
-        return history, new_state, [], gr.update(), gr.update(value="")
-
-    asked_texts = [m["content"] for m in history if m["role"] == "assistant" and m["content"].endswith("？")]
-    for _ in range(MAX_RETRY):
-        next_q = gen_followup_question(answers, asked_texts)
-        if next_q not in asked_texts:
-            break
-    else:  # 三次都重复，就给兜底问题
-        next_q = "请告诉我任何最近血糖相关的异常检查项目？"
-
-    history.append({"role":"assistant","content":next_q})
-    step += 1
-    return history, (history, step, answers), file_list, gr.update(), gr.update(value="")
-
-
+def get_latest_knowledge_id():
+    """从 knowledge_info.json 获取最新知识库ID"""
+    info_path = os.path.join(DATA_DIR, "knowledge_info.json")
+    if not os.path.exists(info_path):
+        return None
+    with open(info_path, "r", encoding="utf-8") as f:
+        info = json.load(f)
+    if not info:
+        return None
+    # 取最后一个key（最新创建）
+    latest_id = list(info.keys())[-1]
+    return latest_id
 
 def on_file_upload(file_paths, history, file_list):
     history   = history   or []
@@ -296,6 +305,7 @@ def on_file_upload(file_paths, history, file_list):
                 for k, v in result.items():
                     if v is not None:
                         summary.append(f"{k}: {v}")
+<<<<<<< HEAD
                         mapped_key = key_map.get(k, k)
                         num = None
                         try:
@@ -312,6 +322,11 @@ def on_file_upload(file_paths, history, file_list):
                         # 自动填充到INDICATORS value字段
                         if k in INDICATORS and v not in (None, ""):
                             INDICATORS[k]["value"] = str(v)
+=======
+                    if k in INDICATORS and v not in ("", None):
+                        INDICATORS[k]["value"] = str(v)
+                print(INDICATORS)
+>>>>>>> origin/master
                 if summary:
                     history.append({"role": "system", "content": "自动识别信息：\n" + "\\n".join(summary)})
                 # 自动触发RAG检索
@@ -355,6 +370,7 @@ def on_send(text, file_list, history, name, age, weight, gender, past_history):
     history.append({"role":"user","content":user_msg})
 
     
+<<<<<<< HEAD
     # 优先判断是否有自动识别的数值型指标
     auto_features = {}
     for key, info in INDICATORS.items():
@@ -386,13 +402,37 @@ def on_send(text, file_list, history, name, age, weight, gender, past_history):
                     gr.update(choices=[os.path.basename(p) for p in file_list], value=[]), 
                     gr.update(value="")                         
                 )
+=======
+    for key, info in INDICATORS.items():
+        prompt_text = info["prompt"]
+        value = info["value"]
+        # 打印调试信息可选
+        print(f"指标名：{key}，提示语：{prompt_text}，已填值：{value}")
+        if value is None:
+            # 把这个指标的 prompt 发给用户
+            history.append({
+                "role": "assistant",
+                "content": prompt_text
+            })
+            INDICATORS[key]["value"] = user_msg
+            return (
+                history,                                     
+                history,                                     
+                file_list,                                    
+                gr.update(choices=[os.path.basename(p) for p in file_list], value=[]), 
+                gr.update(value="")                          
+            )
+>>>>>>> origin/master
 
     # 仅拼接已上传文件信息
     if file_list:
         names = ", ".join(os.path.basename(p) for p in file_list)
         user_msg = (user_msg + "\n" if user_msg else "") + f"[已上传文件：{names}]"
+<<<<<<< HEAD
     # 用户消息直接传递（前端不显示个人信息）
     history.append({"role":"user","content":user_msg})
+=======
+>>>>>>> origin/master
 
     # 拼接个人信息（后端传给模型，不显示在聊天区）
     personal_info = (
@@ -409,6 +449,7 @@ def on_send(text, file_list, history, name, age, weight, gender, past_history):
 
     # LLM 建议
     if auto_info:
+<<<<<<< HEAD
         # 从history中查找rag检索结果
         rag_info = ''
         for m in reversed(history):
@@ -421,6 +462,11 @@ def on_send(text, file_list, history, name, age, weight, gender, past_history):
             f"用户个人信息：{personal_info}\n"
             f"用户上传了医学报告或图片，系统自动识别出如下结构化信息：\n{auto_info}\n"
             f"{rag_info}"
+=======
+        prompt = (
+            f"用户个人信息：{personal_info}\n"
+            f"用户上传了医学报告或图片，系统自动识别出如下结构化信息：\n{auto_info}\n,并恢复在auto_info中了解了什么"
+>>>>>>> origin/master
             f"请基于这些医学信息，结合用户消息“{user_msg}”，并恢复在user_msg中了解了什么，不用解释了解的信息。"
             "如果信息不全可适当说明，但不要说无法识别图片。"
         )
@@ -430,12 +476,43 @@ def on_send(text, file_list, history, name, age, weight, gender, past_history):
             f"用户消息：{user_msg}\n并恢复在user_msg中了解了什么，不用解释了解的信息。"
         )
     logger.info("Prompt to LLM: %s", prompt)
-    try: reply = llm._call(prompt)
-    except Exception as e: reply = f"模型调用出错：{e}"
-    history.append({"role":"assistant","content":reply})
+    # RAG 检索：调用智普知识库对话接口
+    kb_id = get_or_update_knowledge_id()
+    try:
+        kb_reply = kb_manager.chat_with_knowledge_base(
+            knowledge_id=kb_id,
+            question=user_msg,
+            stream=False
+        )
+    except Exception as e:
+        kb_reply = f"知识库检索出错：{e}"
 
-    # 发送后清空已上传列表，不再自动生成病例
-    return history, history, [], gr.update(choices=[], value=[]), gr.update(value="")
+    # 构建 Prompt
+    prompt_parts = [f"用户个人信息：{personal_info}"]
+    if auto_info:
+        prompt_parts.append(f"系统自动识别信息：\n{auto_info}")
+    prompt_parts.append(f"知识库回复：\n{kb_reply}")
+    prompt_parts.append(f"用户消息：{user_msg}")
+    prompt_parts.append("请基于上述信息给出专业、准确的糖尿病管理建议。")
+    final_prompt = "\n".join(prompt_parts)
+    logger.info("Final RAG Prompt to LLM: %s", final_prompt)
+
+    # 调用大模型生成最终回复
+    try:
+        reply = llm._call(final_prompt)
+    except Exception as e:
+        reply = f"模型调用出错：{e}"
+    history.append({"role": "assistant", "content": reply})
+
+    # 清空上传列表
+    return (
+        history,
+        history,
+        [],
+        gr.update(choices=[], value=[]),
+        gr.update(value="")
+    )
+
 
 def on_generate_case(history, name=None, age=None, weight=None, gender=None, past_history=None):
     # 判断个人信息是否填写
@@ -572,8 +649,7 @@ with gr.Blocks(css=css) as demo:
             case_md = gr.Markdown("**病例记录**\n\n尚无内容")
             gen_case_btn = gr.Button("生成病例报告单", elem_id="gen-case-btn")
 
-    init_msg = [{"role":"assistant","content":"您好，我是糖尿病智能问诊助手，开始问诊。"}]
-    state = gr.State((init_msg, 0, {}))   # (history, step, answers)
+    state = gr.State([{"role": "assistant", "content": "您好，我是糖尿病专业助手，请您提供详细病例信息，以便我为您量身定制医学建议。"}])
 
     # 上传 -> 更新聊天 & 文件列表
     upload_btn.upload(
@@ -589,12 +665,12 @@ with gr.Blocks(css=css) as demo:
     )
     # 发送 -> 生成回复，并清空文件列表和输入框
     send_btn.click(
-        fn=guided_on_send,
+        fn=on_send,
         inputs=[text_input, file_list, state, name_input, age_input, weight_input, gender_input, history_input],
         outputs=[chatbot, state, file_list, file_selector, text_input]
     )
     text_input.submit(
-        fn=guided_on_send,
+        fn=on_send,
         inputs=[text_input, file_list, state, name_input, age_input, weight_input, gender_input, history_input],
         outputs=[chatbot, state, file_list, file_selector, text_input]
     )
