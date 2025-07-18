@@ -1,0 +1,542 @@
+{
+  "weekly_nutrition": {
+    "avg_calories": "1800",
+    "carb_percent": 45,
+    "protein_percent": 25,
+    "fat_percent": 30
+  },
+  "daily_meals": {
+    "Monday": {
+      "label": "星期一",
+      "total_calories": 1800,
+      "meals": [
+        {
+          "name": "早餐",
+          "time": "08:00",
+          "subtotal": 400,
+          "items": [
+            {
+              "name": "燕麦粥",
+              "calories": 100,
+              "cook_time": 5,
+              "GI": "低GI",
+              "details": ["燕麦50g，水250ml，无糖"]
+            }
+          ]
+        },
+        {
+          "name": "午餐",
+          "time": "12:00-13:00",
+          "subtotal": 800,
+          "items": [
+            {
+              "name": "糙米饭",
+              "calories": 250,
+              "cook_time": 15,
+              "GI": "中等GI",
+              "details": ["糙米100g"]
+            },
+            {
+              "name": "清炒苦瓜",
+              "calories": 150,
+              "cook_time": 10,
+              "GI": "低GI",
+              "details": ["苦瓜100g，橄榄油适量"]
+            },
+            {
+              "name": "西红柿鸡蛋汤",
+              "calories": 150,
+              "cook_time": 15,
+              "GI": "低GI",
+              "details": ["西红柿50g，鸡蛋1个，盐适量"]
+            }
+          ]
+        },
+        {
+          "name": "晚餐",
+          "time": "18:00-19:00",
+          "subtotal": 600,
+          "items": [
+            {
+              "name": "全麦面包",
+              "calories": 100,
+              "cook_time": 10,
+              "GI": "中等GI",
+              "details": ["全麦面包50g"]
+            },
+            {
+              "name": "清蒸茄子",
+              "calories": 150,
+              "cook_time": 20,
+              "GI": "低GI",
+              "details": ["茄子100g，橄榄油适量"]
+            },
+            {
+              "name": "木耳豆腐",
+              "calories": 150,
+              "cook_time": 20,
+              "GI": "低GI",
+              "details": ["木耳10g，豆腐100g，盐适量"]
+            }
+          ]
+        }
+      ]
+    },
+    "Tuesday": {
+      "label": "星期二",
+      "total_calories": 1800,
+      "meals": [
+        {
+          "name": "早餐",
+          "time": "08:00",
+          "subtotal": 400,
+          "items": [
+            {
+              "name": "小米粥",
+              "calories": 100,
+              "cook_time": 5,
+              "GI": "低GI",
+              "details": ["小米50g，水250ml，无糖"]
+            }
+          ]
+        },
+        {
+          "name": "午餐",
+          "time": "12:00-13:00",
+          "subtotal": 800,
+          "items": [
+            {
+              "name": "红薯",
+              "calories": 200,
+              "cook_time": 15,
+              "GI": "中等GI",
+              "details": ["红薯100g"]
+            },
+            {
+              "name": "炒青菜",
+              "calories": 150,
+              "cook_time": 10,
+              "GI": "低GI",
+              "details": ["青菜100g，橄榄油适量"]
+            },
+            {
+              "name": "西红柿炒鸡蛋",
+              "calories": 150,
+              "cook_time": 15,
+              "GI": "中等GI",
+              "details": ["西红柿50g，鸡蛋1个，盐适量"]
+            }
+          ]
+        },
+        {
+          "name": "晚餐",
+          "time": "18:00-19:00",
+          "subtotal": 600,
+          "items": [
+            {
+              "name": "玉米面馒头",
+              "calories": 100,
+              "cook_time": 10,
+              "GI": "中等GI",
+              "details": ["玉米面50g"]
+            },
+            {
+              "name": "拌黄瓜",
+              "calories": 100,
+              "cook_time": 5,
+              "GI": "低GI",
+              "details": ["黄瓜100g，蒜泥适量"]
+            },
+            {
+              "name": "木耳炒胡萝卜",
+              "calories": 150,
+              "cook_time": 15,
+              "GI": "低GI",
+              "details": ["木耳10g，胡萝卜50g，盐适量"]
+            }
+          ]
+        }
+      ]
+    },
+    "Wednesday": {
+      "label": "星期三",
+      "total_calories": 1800,
+      "meals": [
+        {
+          "name": "早餐",
+          "time": "08:00",
+          "subtotal": 400,
+          "items": [
+            {
+              "name": "绿豆粥",
+              "calories": 100,
+              "cook_time": 5,
+              "GI": "低GI",
+              "details": ["绿豆50g，水250ml，无糖"]
+            }
+          ]
+        },
+        {
+          "name": "午餐",
+          "time": "12:00-13:00",
+          "subtotal": 800,
+          "items": [
+            {
+              "name": "玉米面饼",
+              "calories": 200,
+              "cook_time": 20,
+              "GI": "中等GI",
+              "details": ["玉米面100g"]
+            },
+            {
+              "name": "炒西兰花",
+              "calories": 150,
+              "cook_time": 10,
+              "GI": "低GI",
+              "details": ["西兰花100g，橄榄油适量"]
+            },
+            {
+              "name": "鸡蛋汤",
+              "calories": 150,
+              "cook_time": 15,
+              "GI": "低GI",
+              "details": ["鸡蛋1个，盐适量"]
+            }
+          ]
+        },
+        {
+          "name": "晚餐",
+          "time": "18:00-19:00",
+          "subtotal": 600,
+          "items": [
+            {
+              "name": "小米面馒头",
+              "calories": 100,
+              "cook_time": 10,
+              "GI": "中等GI",
+              "details": ["小米面50g"]
+            },
+            {
+              "name": "凉拌豆芽",
+              "calories": 100,
+              "cook_time": 5,
+              "GI": "低GI",
+              "details": ["豆芽100g，辣椒油适量"]
+            },
+            {
+              "name": "黄瓜炒蘑菇",
+              "calories": 150,
+              "cook_time": 15,
+              "GI": "低GI",
+              "details": ["黄瓜100g，蘑菇50g，盐适量"]
+            }
+          ]
+        }
+      ]
+    },
+    "Thursday": {
+      "label": "星期四",
+      "total_calories": 1800,
+      "meals": [
+        {
+          "name": "早餐",
+          "time": "08:00",
+          "subtotal": 400,
+          "items": [
+            {
+              "name": "红豆粥",
+              "calories": 100,
+              "cook_time": 5,
+              "GI": "低GI",
+              "details": ["红豆50g，水250ml，无糖"]
+            }
+          ]
+        },
+        {
+          "name": "午餐",
+          "time": "12:00-13:00",
+          "subtotal": 800,
+          "items": [
+            {
+              "name": "黑米",
+              "calories": 200,
+              "cook_time": 20,
+              "GI": "低GI",
+              "details": ["黑米100g"]
+            },
+            {
+              "name": "炒菠菜",
+              "calories": 150,
+              "cook_time": 10,
+              "GI": "低GI",
+              "details": ["菠菜100g，橄榄油适量"]
+            },
+            {
+              "name": "豆腐炒肉末",
+              "calories": 150,
+              "cook_time": 15,
+              "GI": "低GI",
+              "details": ["豆腐100g，猪肉末50g，盐适量"]
+            }
+          ]
+        },
+        {
+          "name": "晚餐",
+          "time": "18:00-19:00",
+          "subtotal": 600,
+          "items": [
+            {
+              "name": "玉米饼",
+              "calories": 100,
+              "cook_time": 10,
+              "GI": "中等GI",
+              "details": ["玉米面50g"]
+            },
+            {
+              "name": "凉拌海带丝",
+              "calories": 100,
+              "cook_time": 5,
+              "GI": "低GI",
+              "details": ["海带丝100g，蒜末适量"]
+            },
+            {
+              "name": "黄瓜炒虾皮",
+              "calories": 150,
+              "cook_time": 15,
+              "GI": "低GI",
+              "details": ["黄瓜100g，虾皮10g，盐适量"]
+            }
+          ]
+        }
+      ]
+    },
+    "Friday": {
+      "label": "星期五",
+      "total_calories": 1800,
+      "meals": [
+        {
+          "name": "早餐",
+          "time": "08:00",
+          "subtotal": 400,
+          "items": [
+            {
+              "name": "紫薯粥",
+              "calories": 100,
+              "cook_time": 5,
+              "GI": "低GI",
+              "details": ["紫薯50g，水250ml，无糖"]
+            }
+          ]
+        },
+        {
+          "name": "午餐",
+          "time": "12:00-13:00",
+          "subtotal": 800,
+          "items": [
+            {
+              "name": "荞麦面",
+              "calories": 200,
+              "cook_time": 20,
+              "GI": "低GI",
+              "details": ["荞麦面100g"]
+            },
+            {
+              "name": "炒莴苣",
+              "calories": 150,
+              "cook_time": 10,
+              "GI": "低GI",
+              "details": ["莴苣100g，橄榄油适量"]
+            },
+            {
+              "name": "西红柿炒鸡蛋",
+              "calories": 150,
+              "cook_time": 15,
+              "GI": "中等GI",
+              "details": ["西红柿50g，鸡蛋1个，盐适量"]
+            }
+          ]
+        },
+        {
+          "name": "晚餐",
+          "time": "18:00-19:00",
+          "subtotal": 600,
+          "items": [
+            {
+              "name": "黑麦面馒头",
+              "calories": 100,
+              "cook_time": 10,
+              "GI": "中等GI",
+              "details": ["黑麦面50g"]
+            },
+            {
+              "name": "凉拌芹菜",
+              "calories": 100,
+              "cook_time": 5,
+              "GI": "低GI",
+              "details": ["芹菜100g，蒜泥适量"]
+            },
+            {
+              "name": "黄瓜炒虾仁",
+              "calories": 150,
+              "cook_time": 15,
+              "GI": "低GI",
+              "details": ["黄瓜100g，虾仁50g，盐适量"]
+            }
+          ]
+        }
+      ]
+    },
+    "Saturday": {
+      "label": "星期六",
+      "total_calories": 1800,
+      "meals": [
+        {
+          "name": "早餐",
+          "time": "08:00",
+          "subtotal": 400,
+          "items": [
+            {
+              "name": "南瓜粥",
+              "calories": 100,
+              "cook_time": 5,
+              "GI": "低GI",
+              "details": ["南瓜50g，水250ml，无糖"]
+            }
+          ]
+        },
+        {
+          "name": "午餐",
+          "time": "12:00-13:00",
+          "subtotal": 800,
+          "items": [
+            {
+              "name": "薏米面",
+              "calories": 200,
+              "cook_time": 20,
+              "GI": "低GI",
+              "details": ["薏米面100g"]
+            },
+            {
+              "name": "炒苋菜",
+              "calories": 150,
+              "cook_time": 10,
+              "GI": "低GI",
+              "details": ["苋菜100g，橄榄油适量"]
+            },
+            {
+              "name": "豆腐炖豆腐",
+              "calories": 150,
+              "cook_time": 15,
+              "GI": "低GI",
+              "details": ["豆腐100g，豆腐50g，盐适量"]
+            }
+          ]
+        },
+        {
+          "name": "晚餐",
+          "time": "18:00-19:00",
+          "subtotal": 600,
+          "items": [
+            {
+              "name": "绿豆面馒头",
+              "calories": 100,
+              "cook_time": 10,
+              "GI": "中等GI",
+              "details": ["绿豆面50g"]
+            },
+            {
+              "name": "凉拌紫菜",
+              "calories": 100,
+              "cook_time": 5,
+              "GI": "低GI",
+              "details": ["紫菜100g，蒜末适量"]
+            },
+            {
+              "name": "黄瓜炒蛤蜊",
+              "calories": 150,
+              "cook_time": 15,
+              "GI": "低GI",
+              "details": ["黄瓜100g，蛤蜊50g，盐适量"]
+            }
+          ]
+        }
+      ]
+    },
+    "Sunday": {
+      "label": "星期日",
+      "total_calories": 1800,
+      "meals": [
+        {
+          "name": "早餐",
+          "time": "08:00",
+          "subtotal": 400,
+          "items": [
+            {
+              "name": "山药粥",
+              "calories": 100,
+              "cook_time": 5,
+              "GI": "低GI",
+              "details": ["山药50g，水250ml，无糖"]
+            }
+          ]
+        },
+        {
+          "name": "午餐",
+          "time": "12:00-13:00",
+          "subtotal": 800,
+          "items": [
+            {
+              "name": "糙米",
+              "calories": 200,
+              "cook_time": 20,
+              "GI": "中等GI",
+              "details": ["糙米100g"]
+            },
+            {
+              "name": "炒芦笋",
+              "calories": 150,
+              "cook_time": 10,
+              "GI": "低GI",
+              "details": ["芦笋100g，橄榄油适量"]
+            },
+            {
+              "name": "豆腐炒鸡胸肉",
+              "calories": 150,
+              "cook_time": 15,
+              "GI": "低GI",
+              "details": ["豆腐100g，鸡胸肉50g，盐适量"]
+            }
+          ]
+        },
+        {
+          "name": "晚餐",
+          "time": "18:00-19:00",
+          "subtotal": 600,
+          "items": [
+            {
+              "name": "小米面馒头",
+              "calories": 100,
+              "cook_time": 10,
+              "GI": "中等GI",
+              "details": ["小米面50g"]
+            },
+            {
+              "name": "凉拌海带",
+              "calories": 100,
+              "cook_time": 5,
+              "GI": "低GI",
+              "details": ["海带100g，蒜末适量"]
+            },
+            {
+              "name": "黄瓜炒虾仁",
+              "calories": 150,
+              "cook_time": 15,
+              "GI": "低GI",
+              "details": ["黄瓜100g，虾仁50g，盐适量"]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

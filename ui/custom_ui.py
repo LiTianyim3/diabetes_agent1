@@ -1,4 +1,6 @@
 import gradio as gr
+import subprocess
+
 
 def build_ui(
     on_file_upload,
@@ -178,13 +180,46 @@ def build_ui(
                 with gr.Group(elem_id="case-panel"):
                     case_md = gr.Markdown("**病例记录**\n\n尚无内容")
                 gen_case_btn = gr.Button("生成病例报告单", elem_id="gen-case-btn")
+                nutrition_md = gr.Markdown( elem_id="nutrition-md")
+                # streamlit_btn = gr.Button("打开 Streamlit 应用", elem_id="streamlit-btn")
+
+                streamlit_link = gr.HTML(
+                    """
+                    <div style="margin-top:1.2em;">
+                    <a href="http://localhost:8501" target="_blank"
+                        style="
+                        /* 基本外观，完全复制 #gen-case-btn 的样式 */
+                        background: linear-gradient(90deg, #1976d2 0%, #64b5f6 100%);
+                        color: #fff !important;
+                        font-weight: bold;
+                        border-radius: 8px !important;
+                        min-height: 44px;
+                        font-size: 1.08rem;
+                        box-shadow: 0 2px 8px #1976d222;
+                        border: none !important;
+                        transition: background 0.2s;
+
+                        /* 关键：撑满容器宽度，和 Gradio 原生按钮等宽 */
+                        display: inline-flex;
+                        align-items: center;
+                        justify-content: center;
+                        width: 100%;
+                        padding: 0 16px;
+                        text-decoration: none;
+                        "
+                        onmouseover="this.style.background='linear-gradient(90deg, #64b5f6 0%, #1976d2 100%)';"
+                        onmouseout="this.style.background='linear-gradient(90deg, #1976d2 0%, #64b5f6 100%)';"
+                    >生成专属饮食计划</a>
+                    </div>
+                    """
+                )
 
         file_list = gr.State([])
         state = gr.State([{"role": "assistant", "content": "您好，我是糖尿病专业助手，请您提供详细病例信息，以便我为您量身定制医学建议。"}])
 
         upload_btn.upload(
             fn=on_file_upload,
-            inputs=[upload_btn, state, file_list],
+            inputs=[upload_btn, state, file_list,file_selector],
             outputs=[chatbot, state, file_list, file_selector]
         )
         file_selector.change(
@@ -212,5 +247,14 @@ def build_ui(
             inputs=[state, name_input, age_input, weight_input, gender_input, history_input],
             outputs=[case_md]
         )
+
+        # streamlit_btn.click(
+        #     fn=None,                   # 不调用任何 Python 函数
+        #     inputs=[],                 
+        #     outputs=[],
+        #     _js="window.open('http://localhost:8501', '_blank')"  
+        #     # 如果想在当前标签页跳转，就用:
+        #     # _js="window.location.href='http://localhost:8501'"
+        # )
 
     return demo

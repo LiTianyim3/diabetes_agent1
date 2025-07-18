@@ -1,0 +1,61 @@
+根据以上的用户饮食偏好，请帮我生成一个糖尿病患者一周饮食计划，要求如下：
+
+1. 整体输出严格符合JSON格式，结构如下：
+{
+  "weekly_nutrition": {
+    "avg_calories": "2000",
+    "carb_percent": 40,
+    "protein_percent": 30,
+    "fat_percent": 30
+  },
+  "daily_meals": {
+    "Monday": {
+      "label": "星期一",
+      "total_calories": 2000,
+      "meals": [
+        {
+          "name": "早餐",
+          "time": "08:00",
+          "subtotal": 500,
+          "items": [
+            {
+              "name": "食物名",
+              "calories": 150,
+              "cook_time": 10,
+              "GI": "具体GI值",
+              "details": ["主料及重量说明、调味料及重量说明"]
+            }
+          ]
+        },
+        {
+          "name": "午餐",
+          "time": "12:00-13:00",
+          "subtotal": 800,
+          "items": []
+        },
+        {
+          "name": "晚餐",
+          "time": "18:00-19:00",
+          "subtotal": 700,
+          "items": []
+        }
+      ]
+    },
+    "Tuesday": { ... },
+    "Wednesday": { ... },
+    "Thursday": { ... },
+    "Friday": { ... },
+    "Saturday": { ... },
+    "Sunday": { ... }
+  }
+}
+
+其中平均每日热量(卡)avg_calories的多少，碳水化合物、蛋白质、脂肪三类的占比carb_percent,protein_percent,fat_percent，这些变量都需要根据用户的具体数据和偏好，由你来自己定义
+
+3. 请为每一天设计合理的三餐，包含每餐时间、总热量、菜品名称、热量、做饭时间和原料明细。
+
+4. 请仅输出符合上述JSON格式的内容，且确保JSON语法正确，不要多余说明或文本。
+
+需要给出完整的七天食谱内容，不要只给出周一和周二的
+注意:早餐只给一道菜就可以，午餐和晚餐需要给出三道菜（其中一定要有一道主食，两道菜），七天内每天给出的菜品都不要重复
+不要输出到一半就停止并询问我是否继续，你要直接一次性输出完，请开始生成：
